@@ -121,6 +121,19 @@ services:
       retries: 10
       start_period: 20s
 
+  # Воркер: тот же образ, своя команда. Сети backend (БД, S3) и egress (выход к модели и OCR).
+  worker:
+    <<: *hardening
+    image: hr-docs/backend:local
+    command: ["python", "-m", "app.queue.worker"]
+    env_file: .env
+    environment:
+      WORKER_NAME: worker-1
+    stop_grace_period: 30s
+    networks: [backend, egress]
+    depends_on:
+      api: {condition: service_healthy}
+
   caddy:
     <<: *hardening
     build:
