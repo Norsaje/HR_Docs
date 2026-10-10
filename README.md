@@ -105,6 +105,41 @@ docker compose ps       # все сервисы healthy; первый старт
 
 Поменять `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` в `.env` и пересоздать воркер: `docker compose up -d worker`. Подробно (vLLM на своей GPU) — [docs/local-model.md](docs/local-model.md).
 
+## Развёртывание на сервере с доменом
+
+Чтобы судьи открывали стенд с телефона по нормальному адресу с настоящим сертификатом. Всё переключается через `.env`, код не меняется. Ниже `<IP>` — адрес сервера, `<домен>` — имя для него.
+
+**Домен без покупки:** `<IP-с-дефисами>.sslip.io` (например, адрес `1.2.3.4` → домен `1-2-3-4.sslip.io`), запасной вариант — `nip.io`. Это только DNS: имя указывает прямо на наш сервер, трафик через третьи стороны не идёт. Туннели вроде ngrok или cloudflared **не используем**: через них пошли бы персональные данные.
+
+1. **Порты.** Снаружи должны быть открыты 80 (выпуск сертификата Let's Encrypt) и 443. Проверка с любой машины:
+   ```bash
+   curl -m 5 -sS -o /dev/null -w "%{http_code}\n" http://<IP>    # любой HTTP-код = порт открыт; таймаут = закрыт
+   ```
+   Если порты закрыты, откройте их в настройках сервера или облака. Если открыть нельзя — см. шаг 6.
+2. **Код на сервер:**
+   ```bash
+   ssh <пользователь>@<IP>
+   git clone <адрес репозитория> ~/hr_docs && cd ~/hr_docs
+   # или с ноутбука без доступа сервера к git: git archive HEAD | ssh <пользователь>@<IP> "mkdir -p ~/hr_docs && tar -x -C ~/hr_docs"
+   ```
+3. **`.env` на сервере — новые секреты, не копия с ноутбука:**
+   ```bash
+   cp .env.example .env && chmod 600 .env
+   # впишите в .env:
+   #   PUBLIC_BASE_URL=https://<домен>
+   #   SITE_ADDRESS=<домен>
+   #   OIDC_ISSUER=https://<домен>/kc/realms/hr
+   #   CADDY_TLS=<email команды>        # Caddy сам получит сертификат Let's Encrypt
+   #   LLM_API_KEY=<ключ модели>        # единственное значение, которое переносится вручную
+   python3 scripts/gen_secrets.py      # = make secrets: заполнит пустые секреты случайными значениями
+   ```
+4. **Запуск:** `docker compose up -d --build`. Первый старт — несколько минут: сборка образов, импорт realm, выпуск сертификата. Следить: `docker compose ps`, `docker compose logs -f caddy`.
+5. **Проверка:** откройте `https://<домен>/` (соискатель) и `https://<домен>/operator/` (вход через Keycloak). Браузер не должен показывать предупреждений о сертификате.
+6. **Если 80/443 открыть нельзя:** поставьте `CADDY_TLS=internal`, `PUBLIC_BASE_URL=https://localhost`, `SITE_ADDRESS=localhost`, `OIDC_ISSUER=https://localhost/kc/realms/hr` и ходите на стенд через SSH-туннель: `ssh -L 443:localhost:443 <пользователь>@<IP>`, затем `https://localhost` на своей машине (сертификат самоподписанный).
+7. **Модель на том же сервере (vLLM, профиль `llm-local`):** воркер ходит к ней напрямую по внутренней сети Docker: `LLM_BASE_URL=http://vllm:8000/v1` (см. [docs/local-model.md](docs/local-model.md)), затем `docker compose up -d worker`.
+
+**Важно про Keycloak:** realm `hr` импортируется из `infra/keycloak/realm-hr.json` **только на чистой БД**. В нём зашиты адрес стенда (redirect URI, issuer) и пароли тестовых операторов. Поэтому при смене адреса стенда либо поднимайте стенд на новом volume (`docker compose down -v` **удалит все данные**), либо поправьте redirect URI и web origins клиента `operator-bff` в админке Keycloak (через туннель `make kc-admin-tunnel-help`).
+
 ## Документация
 
 - [Схема решения](docs/architecture.md)
