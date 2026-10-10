@@ -37,3 +37,8 @@ Thumbs.db
 # служебное
 START.md
 .claude/
+
+# e2e: скриншоты с документами открытого набора и служебные отчёты Playwright
+web/*/e2e/screenshots/private/
+web/*/test-results/
+web/*/playwright-report/
