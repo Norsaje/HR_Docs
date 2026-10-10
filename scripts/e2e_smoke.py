@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 import httpx
-import mailpit_code
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -79,12 +78,6 @@ def main() -> int:
     app = r.json()
     h = {"X-Application-Token": app["token"]}
     files = {"files": (sample.name, sample.read_bytes(), "image/jpeg")}
-    r = c.post(f"/api/public/applications/{app['application_id']}/files", data={"doc_type": "ru_passport"}, files=files, headers=h)
-    ok(r.status_code == 403, f"без подтверждения email загрузка запрещена: {r.json()['error']['message']}")
-    r = c.post(f"/api/public/applications/{app['application_id']}/confirm-email", json={"code": "000000"}, headers=h)
-    ok(r.status_code in (422, 200), "неверный код отклонён" if r.status_code == 422 else "код случайно совпал")
-    mailpit_code.confirm(c, app)
-    ok(True, "email подтверждён кодом из письма в Mailpit")
     r = c.post(
         f"/api/public/applications/{app['application_id']}/files",
         data={"doc_type": "ru_passport"},

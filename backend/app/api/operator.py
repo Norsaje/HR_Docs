@@ -270,7 +270,6 @@ async def card(
             "email_masked": mask_email(a["email"]),
             "country_code": a["country_code"],
             "status": a["status"],
-            "email_confirmed": a["email_confirmed_at"] is not None,
             "created_at": a["created_at"].isoformat(),
             "missing": [
                 dt for dt in allowed if reg.documents[dt].required and dt not in {d["doc_type"] for d in docs}

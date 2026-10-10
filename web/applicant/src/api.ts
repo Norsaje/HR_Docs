@@ -42,7 +42,6 @@ export type AppState = {
   status: string;
   documents: AppDocument[];
   missing: string[];
-  email_confirmed?: boolean;
 };
 
 export class ApiError extends Error {
@@ -174,22 +173,6 @@ export const api = {
   submit: (s: Session) =>
     request<{ public_no: string; missing: string[] }>(
       `/api/public/applications/${s.application_id}/submit`,
-      { method: "POST" },
-      s.token,
-    ),
-  confirmEmail: (s: Session, code: string) =>
-    request<{ email_confirmed: boolean }>(
-      `/api/public/applications/${s.application_id}/confirm-email`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      },
-      s.token,
-    ),
-  resendCode: (s: Session) =>
-    request<{ sent: boolean }>(
-      `/api/public/applications/${s.application_id}/resend-code`,
       { method: "POST" },
       s.token,
     ),
