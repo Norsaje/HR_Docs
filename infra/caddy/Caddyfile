@@ -1,0 +1,57 @@
+# Caddy — единственная точка входа (443/80). Остальные сервисы живут во внутренней сети backend.
+# Отладочные входы (админка Keycloak, Mailpit) слушают 8081/8025, но в compose опубликованы только на 127.0.0.1.
+{
+	admin off
+}
+
+{$SITE_ADDRESS} {
+	tls {$CADDY_TLS}
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Админка Keycloak и realm master снаружи не существуют.
+	# Именно handle (а не голый respond): Caddy выполняет handle раньше respond,
+	# и без этого запрос ушёл бы в handle /kc/* и дальше в Keycloak.
+	@kc_private path /kc/admin /kc/admin/* /kc/realms/master /kc/realms/master/* /kc/resources/master/*
+	handle @kc_private {
+		respond 404
+	}
+
+	handle /kc/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /api/* {
+		# flush_interval -1 — без буферизации, иначе SSE-статусы приходят пачками.
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+	handle_path /operator* {
+		root * /srv/operator
+		header Content-Security-Policy "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		try_files {path} /index.html
+		file_server
+	}
+	handle {
+		root * /srv/applicant
+		header Content-Security-Policy "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Админка Keycloak: ssh -L 8081:127.0.0.1:8081 <стенд>, затем http://localhost:8081/kc/admin
+http://:8081 {
+	reverse_proxy keycloak:8080
+}
+
+# Письма стенда: ssh -L 8025:127.0.0.1:8025 <стенд>
+http://:8025 {
+	reverse_proxy mailpit:8025
+}
