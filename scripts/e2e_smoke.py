@@ -33,6 +33,17 @@ def ok(cond: bool, text: str) -> None:
         sys.exit(1)
 
 
+def login(base: str, username: str, password: str) -> httpx.Client:
+    """Вход оператора через настоящую форму Keycloak (BFF); клиент с cookie сессии."""
+    op = httpx.Client(base_url=base, verify=False, timeout=30, follow_redirects=False)
+    r = op.get("/api/auth/login?return_to=/operator/")
+    r = op.get(r.headers["location"])
+    action = re.search(r'action="([^"]+)"', r.text).group(1).replace("&amp;", "&")
+    r = op.post(action, data={"username": username, "password": password, "credentialId": ""})
+    op.get(r.headers["location"])
+    return op
+
+
 def main() -> int:
     e = env()
     base = e["PUBLIC_BASE_URL"]
@@ -164,6 +175,18 @@ def main() -> int:
         "waiting" in q,
         f"«В работе»: ждёт {q['waiting']}, за час {q['done_last_hour']}, среднее {q['avg_duration_s']} с",
     )
+    spb = login(base, "editor.spb", e["KC_DEMO_PASSWORD"])
+    ok(
+        spb.get(f"/api/operator/applications/{app['application_id']}").status_code == 404,
+        "editor.spb открывает заявку Москвы → 404",
+    )
+    reader = login(base, "reader.msk", e["KC_DEMO_PASSWORD"])
+    r = reader.patch(
+        f"/api/operator/fields/{f0['id']}", json={"value": "X"}, headers={"X-Requested-With": "fetch"}
+    )
+    ok(r.status_code == 403, "doc-reader правит поле → 403")
+    r = op.patch(f"/api/operator/fields/{f0['id']}", json={"value": "X"})
+    ok(r.status_code == 403, "PATCH без X-Requested-With → 403 (CSRF)")
     print("e2e-smoke: всё зелёное")
     return 0
 
