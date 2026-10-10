@@ -10,9 +10,9 @@ from __future__ import annotations
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field, SecretStr, ValidationError
+from pydantic import Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -108,6 +108,17 @@ class Settings(BaseSettings):
     SMTP_HOST: str = "mailpit"
     SMTP_PORT: int = 1025
     MAIL_FROM: str = "noreply@hr-agency.local"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_comment_values(cls, data: Any) -> Any:
+        # docker compose env_file не вырезает комментарий у ПУСТОЙ переменной: «X=   # пояснение»
+        # приходит как значение «# пояснение». Такие значения считаем пустыми.
+        if isinstance(data, dict):
+            return {
+                k: ("" if isinstance(v, str) and v.strip().startswith("#") else v) for k, v in data.items()
+            }
+        return data
 
     # Пути к реестру и промптам (в образе — /app/registry, /app/prompts)
     REGISTRY_PATH: Path = Field(default=APP_ROOT / "registry" / "documents.yaml")
