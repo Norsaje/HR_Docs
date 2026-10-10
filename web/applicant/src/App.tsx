@@ -224,12 +224,14 @@ export default function App() {
         <Steps step={step} />
       </header>
       {session ? (
-        <ApplicationScreen
-          session={session}
-          country={country}
-          onReset={onReset}
-          onSubmittedChange={setSubmitted}
-        />
+        <EmailGate session={session}>
+          <ApplicationScreen
+            session={session}
+            country={country}
+            onReset={onReset}
+            onSubmittedChange={setSubmitted}
+          />
+        </EmailGate>
       ) : (
         <StartScreen onCreated={onCreated} />
       )}
@@ -242,6 +244,94 @@ export default function App() {
         </a>
       </footer>
     </div>
+  );
+}
+
+// Шаг «подтвердите email»: пока код из письма не введён, сервер не принимает файлы (403),
+// поэтому и экран документов не показываем.
+function EmailGate({
+  session,
+  children,
+}: {
+  session: Session;
+  children: React.ReactNode;
+}) {
+  const [confirmed, setConfirmed] = useState<boolean | null>(null);
+  const [code, setCode] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .state(session)
+      .then((st) => setConfirmed(st.email_confirmed !== false))
+      .catch(() => setConfirmed(true)); // ошибку покажет экран заявки
+  }, [session]);
+
+  if (confirmed === null) return <div className="card">Загружаем заявку…</div>;
+  if (confirmed) return <>{children}</>;
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.confirmEmail(session, code);
+      setConfirmed(true);
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const resend = async () => {
+    setMsg(null);
+    try {
+      await api.resendCode(session);
+      setMsg("Новый код отправлен — проверьте почту.");
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  };
+
+  return (
+    <form className="card" onSubmit={submit} data-testid="email-gate">
+      <h2>Подтвердите email</h2>
+      <p className="muted">
+        Мы отправили письмо с кодом из 6 цифр. Введите его, чтобы перейти к
+        загрузке документов (заявка {session.public_no}).
+      </p>
+      <label className="field">
+        <span className="label">Код из письма</span>
+        <input
+          value={code}
+          onChange={(e) =>
+            setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+          }
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="000000"
+          required
+          minLength={6}
+          maxLength={6}
+        />
+      </label>
+      {msg && (
+        <p className="muted" role="alert">
+          {msg}
+        </p>
+      )}
+      <button
+        className="primary"
+        type="submit"
+        disabled={busy || code.length !== 6}
+      >
+        Подтвердить
+      </button>
+      <button type="button" className="link-btn" onClick={() => void resend()}>
+        Отправить код ещё раз
+      </button>
+    </form>
   );
 }
 

@@ -177,6 +177,22 @@ export const api = {
       { method: "POST" },
       s.token,
     ),
+  confirmEmail: (s: Session, code: string) =>
+    request<{ email_confirmed: boolean }>(
+      `/api/public/applications/${s.application_id}/confirm-email`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      },
+      s.token,
+    ),
+  resendCode: (s: Session) =>
+    request<{ sent: boolean }>(
+      `/api/public/applications/${s.application_id}/resend-code`,
+      { method: "POST" },
+      s.token,
+    ),
   state: (s: Session) =>
     request<AppState>(
       `/api/public/applications/${s.application_id}`,
