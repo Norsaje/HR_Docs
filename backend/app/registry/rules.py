@@ -9,8 +9,8 @@ code — без пробелов. Правило получает нормали
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.registry.checksums import inn12_ok, snils_ok
 from app.registry.loader import DocumentDef, FieldDef, Registry, RuleDef
@@ -45,7 +45,11 @@ _MONTHS = {
 
 
 def today(tz: str = "Europe/Moscow") -> date:
-    return datetime.now(ZoneInfo(tz)).date()
+    """«Сегодня» в часовом поясе стенда; без базы часовых поясов (Windows) — UTC+3."""
+    try:
+        return datetime.now(ZoneInfo(tz)).date()
+    except ZoneInfoNotFoundError:
+        return datetime.now(timezone(timedelta(hours=3))).date()
 
 
 def parse_date(raw: str, role: str | None = None, now: date | None = None) -> date | None:

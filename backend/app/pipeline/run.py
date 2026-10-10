@@ -1,16 +1,18 @@
 """Разбор одного файла (задача process_file в воркере): preprocess → extract → verify.
 
-Поля читает модель (один вызов Qwen через app/llm по JSON-схеме из реестра); детерминированный
-код нормализует их, проверяет правилами реестра и красит:
-  зелёный — прочитано и подтверждено «твёрдой» проверкой (контрольная сумма, текстовый слой PDF);
-  жёлтый — прочитано, правила пройдены, но подтвердить нечем;
-  красный — не прочитано обязательное поле или нарушено правило; серый — необязательного поля нет.
+Непригодный снимок (темно, размыто) получает «нечитаемо» с советом без вызова модели.
+Поля читает Qwen (проход A, JSON-схема из реестра), параллельно olmOCR даёт независимый
+дословный текст (проход B, кэш по sha256 страницы, сбой OCR разбор не останавливает).
+verify.py сверяет прочтение с правилами, контрольными суммами, МЧЗ, текстом OCR и PDF;
+confidence.py красит поле: зелёный — только при независимом подтверждении (§2.7).
 Пайплайн получает байты и UUID файла; исходное имя файла сюда не передаётся.
 Ошибки модели не превращаются в данные: ModelError уходит в очередь (повтор или failed).
 """
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import io
 import json
 import uuid
@@ -19,18 +21,22 @@ from typing import Any
 
 import asyncpg
 import pypdfium2 as pdfium
-from PIL import Image, ImageOps, ImageStat
+from PIL import Image, ImageOps
 
 from app.audit.log import audit
 from app.config import Settings
 from app.llm.gateway import Gateway
 from app.llm.schema_builder import Extraction
+from app.pipeline.ocr_vote import candidates as ocr_candidates
+from app.pipeline.quality import assess
+from app.pipeline.verify import verify_fields
 from app.registry.loader import Registry
+from app.registry.mrz import find_lines
+from app.registry.mrz import parse as parse_mrz
 from app.registry.rules import evaluate, normalize
 from app.storage.s3 import Storage
 
 COLOR_RANK = {"green": 3, "yellow": 2, "grey": 1, "red": 0}
-_HARD_CHECKS = {"checksum_inn12", "checksum_snils"}
 
 
 def preprocess(data: bytes, mime: str, max_side: int) -> tuple[bytes, str | None]:
@@ -49,11 +55,6 @@ def preprocess(data: bytes, mime: str, max_side: int) -> tuple[bytes, str | None
     buf = io.BytesIO()
     im.save(buf, "PNG")
     return buf.getvalue(), text
-
-
-def too_dark(png: bytes, threshold: float) -> bool:
-    with Image.open(io.BytesIO(png)) as im:
-        return float(ImageStat.Stat(im.convert("L")).mean[0]) < threshold
 
 
 async def process_file(
@@ -82,11 +83,11 @@ async def process_file(
     page_key = f"derived/{file_id}/page-1.png"
     await storage.put(page_key, png, "image/png")
     await pool.execute("UPDATE files SET page_key=$2 WHERE id=$1", file_id, page_key)
-    if not text_layer and too_dark(png, 35):
-        await finish_unreadable(
-            pool, f, "Фото слишком тёмное. Сфотографируйте документ при хорошем освещении."
-        )
-        return
+    if not text_layer:  # у «цифрового» PDF резкость не проверяем — текст берём из слоя
+        q = assess(png)
+        if q.reject_reason:
+            await finish_unreadable(pool, f, q.reject_reason)  # модель на непригодном фото не вызываем
+            return
 
     await set_stage("extract")
     await audit(
@@ -97,8 +98,21 @@ async def process_file(
         application_id=f["app_id"],
         object_id=file_id,
     )
-    result = await gw.extract(png, doc_type, text_layer)
-    ext = Extraction.model_validate(result.data)
+    # Проходы A (Qwen) и B (olmOCR) идут параллельно; сбой OCR разбор не останавливает.
+    ocr_task = asyncio.create_task(ocr_pass(pool, gw, png))
+    try:
+        result = await gw.extract(png, doc_type, text_layer)
+        ext = Extraction.model_validate(result.data)
+        if ext.orientation in (90, 180, 270) and ext.is_document:
+            # Документ повёрнут: поворачиваем страницу и повторяем проход A один раз.
+            png = rotate_png(png, ext.orientation)
+            await storage.put(page_key, png, "image/png")
+            result = await gw.extract(png, doc_type, text_layer)
+            ext = Extraction.model_validate(result.data)
+    except BaseException:
+        ocr_task.cancel()
+        raise
+    ocr_md, ocr_status = await ocr_task
     await pool.execute(
         "INSERT INTO extraction_runs (file_id, provider, base_url_host, model, prompt_version, schema_hash, "
         "duration_ms, tokens_in, tokens_out, doc_type_detected) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
@@ -124,42 +138,35 @@ async def process_file(
         for k, v in ext.fields.items()
         if k in doc.fields
     }
-    broken = {
-        r.field: msg
-        for r, msg in evaluate(doc, values, registry, settings.EXPIRY_WARNING_DAYS)
-        if r.severity == "error"
-    }
-    passed_hard = {
-        r.field
-        for r in doc.rules
-        if r.check in _HARD_CHECKS and r.field not in broken and values.get(r.field)
-    }
+    mrz = None
+    if doc.mrz:
+        lines = [*ext.mrz_lines, *(find_lines(ocr_md) if ocr_md else [])]
+        mrz = parse_mrz(lines, list(doc.mrz))
+    verdicts = verify_fields(
+        doc,
+        registry,
+        ext,
+        values,
+        ocr=ocr_candidates(ocr_md) if ocr_md else None,
+        ocr_status=ocr_status,
+        mrz=mrz,
+        text_layer=text_layer,
+        page_png=png,
+        warn_days=settings.EXPIRY_WARNING_DAYS,
+        votes_cyrillic=settings.OCR_VOTES_CYRILLIC,
+    )
     async with pool.acquire() as conn, conn.transaction():
-        for key, fv in ext.fields.items():
-            if key not in doc.fields:
-                continue
-            value = values.get(key)
-            signals: list[str] = []
-            if fv.status != "ok":
-                color = "red" if key in doc.min_fields or fv.status == "unreadable" else "grey"
-                signals.append(fv.status)
-            elif key in broken:
-                color, signals = "red", ["rule_fail"]
-            elif key in passed_hard:
-                color, signals = "green", ["checksum_ok"]
-            elif text_layer and value and value.replace("-", "") in "".join(text_layer.split()).upper():
-                color, signals = "green", ["text_layer_match"]
-            else:
-                color, signals = "yellow", ["single_source"]
-            if fv.kind != "printed" and color == "green":
-                color = "yellow"
+        for key, v in verdicts.items():
+            fv = ext.fields[key]
             # Слияние файлов документа: лучший цвет побеждает, правка оператора неприкосновенна.
             await conn.execute(
-                """INSERT INTO fields (id, document_id, file_id, key, value, raw, status, kind, bbox, confidence, signals)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb)
+                """INSERT INTO fields (id, document_id, file_id, key, value, raw, status, kind, bbox, confidence,
+                                       signals, candidates, hint)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13)
                    ON CONFLICT (document_id, key) DO UPDATE SET file_id=EXCLUDED.file_id, value=EXCLUDED.value,
                      raw=EXCLUDED.raw, status=EXCLUDED.status, kind=EXCLUDED.kind, bbox=EXCLUDED.bbox,
-                     confidence=EXCLUDED.confidence, signals=EXCLUDED.signals
+                     confidence=EXCLUDED.confidence, signals=EXCLUDED.signals, candidates=EXCLUDED.candidates,
+                     hint=EXCLUDED.hint
                    WHERE fields.source <> 'operator' AND (fields.file_id = EXCLUDED.file_id OR
                      CASE fields.confidence WHEN 'green' THEN 3 WHEN 'yellow' THEN 2 WHEN 'grey' THEN 1 ELSE 0 END
                      <= CASE EXCLUDED.confidence WHEN 'green' THEN 3 WHEN 'yellow' THEN 2 WHEN 'grey' THEN 1 ELSE 0 END)""",
@@ -167,13 +174,15 @@ async def process_file(
                 f["document_id"],
                 file_id,
                 key,
-                value,
+                v.value,
                 fv.raw,
                 fv.status,
                 fv.kind,
                 json.dumps(fv.bbox),
-                color,
-                json.dumps(signals),
+                v.color,
+                json.dumps(v.signals),
+                json.dumps(v.candidates, ensure_ascii=False),
+                v.hint,
             )
         mismatch = None
         if ext.doc_type != doc_type:
@@ -193,16 +202,61 @@ async def process_file(
             "FROM fields WHERE document_id=$1",
             f["document_id"],
         )
+        ocr_note = {
+            "ok": "olmOCR — второй голос",
+            "unavailable": "olmOCR недоступен",
+            "off": "olmOCR выключен",
+        }
+        mrz_note = "; МЧЗ сверена" if mrz and mrz.valid else ""
         await audit(
             conn,
             worker,
             "parse.finished",
             f"Разбор завершён за {result.duration_ms / 1000:.1f} с: {summary['n']} полей, {summary['g']} зелёных, "
-            f"{summary['y']} жёлтых, {summary['r']} красных ({result.model} @ {result.base_url_host})",
+            f"{summary['y']} жёлтых, {summary['r']} красных ({result.model} @ {result.base_url_host}; "
+            f"{ocr_note.get(ocr_status, ocr_status)}{mrz_note})",
             application_id=f["app_id"],
             object_id=file_id,
-            details={"duration_ms": result.duration_ms, "model": result.model, "provider": result.provider},
+            details={
+                "duration_ms": result.duration_ms,
+                "model": result.model,
+                "provider": result.provider,
+                "ocr": ocr_status,
+                "mrz_valid": bool(mrz and mrz.valid),
+            },
         )
+
+
+def rotate_png(png: bytes, orientation: int) -> bytes:
+    """Документ повёрнут на orientation° по часовой — поворачиваем изображение обратно."""
+    with Image.open(io.BytesIO(png)) as im:
+        rotated = im.rotate(orientation, expand=True)
+    buf = io.BytesIO()
+    rotated.save(buf, "PNG")
+    return buf.getvalue()
+
+
+async def ocr_pass(pool: asyncpg.Pool, gw: Gateway, png: bytes) -> tuple[str | None, str]:
+    """Проход B с кэшем по sha256 страницы: (markdown, ok | unavailable | off). Никогда не бросает."""
+    if not gw.ocr_enabled:
+        return None, "off"
+    sha = hashlib.sha256(png).hexdigest()
+    cached = await pool.fetchval("SELECT markdown FROM ocr_cache WHERE page_sha256=$1", sha)
+    if cached is not None:
+        return str(cached), "ok"
+    try:
+        r = await gw.ocr(png)
+    except Exception:  # noqa: BLE001 — OCR необязателен: без него поля станут жёлтыми, а не зелёными
+        return None, "unavailable"
+    await pool.execute(
+        "INSERT INTO ocr_cache (page_sha256, markdown, provider, duration_ms) VALUES ($1,$2,$3,$4) "
+        "ON CONFLICT DO NOTHING",
+        sha,
+        r.markdown,
+        r.provider,
+        r.duration_ms,
+    )
+    return r.markdown, "ok"
 
 
 async def finish_unreadable(pool: asyncpg.Pool, f: asyncpg.Record, reason: str) -> None:
