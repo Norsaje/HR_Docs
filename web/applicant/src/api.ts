@@ -29,8 +29,11 @@ export type AppFile = {
 export type AppDocument = {
   doc_type: string;
   title: string;
+  required?: boolean;
   status: string;
+  status_ru?: string;
   stage?: string | null;
+  stage_ru?: string | null;
   message?: string | null;
   files: AppFile[];
 };
@@ -52,6 +55,22 @@ export class ApiError extends Error {
 }
 
 const GENERIC = "Сервис временно недоступен. Попробуйте ещё раз через минуту.";
+const NETWORK = "Нет связи с сервером. Проверьте интернет и попробуйте снова.";
+
+function parseError(status: number, text: string): ApiError {
+  let err: { code?: string; message?: string } | undefined;
+  try {
+    err = (JSON.parse(text) as { error?: { code?: string; message?: string } })
+      .error;
+  } catch {
+    err = undefined;
+  }
+  return new ApiError(
+    status,
+    err?.code ?? "HTTP_" + status,
+    err?.message ?? GENERIC,
+  );
+}
 
 async function request<T>(
   url: string,
@@ -65,29 +84,40 @@ async function request<T>(
   try {
     res = await fetch(url, { ...init, headers, credentials: "same-origin" });
   } catch {
-    throw new ApiError(
-      0,
-      "NETWORK",
-      "Нет связи с сервером. Проверьте интернет и попробуйте снова.",
-    );
+    throw new ApiError(0, "NETWORK", NETWORK);
   }
   const text = await res.text();
-  let body: unknown = null;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    body = null;
-  }
-  if (!res.ok) {
-    const err = (body as { error?: { code?: string; message?: string } } | null)
-      ?.error;
-    throw new ApiError(
-      res.status,
-      err?.code ?? "HTTP_" + res.status,
-      err?.message ?? GENERIC,
-    );
-  }
-  return body as T;
+  if (!res.ok) throw parseError(res.status, text);
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+// Загрузка одного файла через XMLHttpRequest: у fetch нет события прогресса отправки.
+function uploadWithProgress(
+  url: string,
+  form: FormData,
+  token: string,
+  onProgress: (fraction: number) => void,
+): Promise<{ results: FileResult[] }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("X-Requested-With", "fetch");
+    xhr.setRequestHeader("X-Application-Token", token);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as { results: FileResult[] });
+        } catch {
+          reject(new ApiError(xhr.status, "BAD_JSON", GENERIC));
+        }
+      } else reject(parseError(xhr.status, xhr.responseText));
+    };
+    xhr.onerror = () => reject(new ApiError(0, "NETWORK", NETWORK));
+    xhr.send(form);
+  });
 }
 
 export const api = {
@@ -112,15 +142,17 @@ export const api = {
     s: Session,
     docType: string,
     file: File,
+    onProgress: (fraction: number) => void,
   ): Promise<FileResult> => {
     const form = new FormData();
     form.append("doc_type", docType);
     form.append("files", file, file.name);
     try {
-      const r = await request<{ results: FileResult[] }>(
+      const r = await uploadWithProgress(
         `/api/public/applications/${s.application_id}/files`,
-        { method: "POST", body: form },
+        form,
         s.token,
+        onProgress,
       );
       return (
         r.results[0] ?? {
@@ -173,13 +205,26 @@ export function loadSession(): Session | null {
   }
   if (m) {
     const [, id, token] = m;
-    return {
+    const s = {
       application_id: id,
       token,
       public_no: stored?.application_id === id ? stored.public_no : "",
     };
+    try {
+      localStorage.setItem(KEY, JSON.stringify(s));
+    } catch {
+      /* ignore */
+    }
+    return s;
   }
+  // После перезагрузки без hash возвращаем ссылку в адресную строку — её можно скопировать.
+  if (stored)
+    window.location.hash = `#/a/${stored.application_id}/${stored.token}`;
   return stored;
+}
+
+export function linkFor(s: Session): string {
+  return `${window.location.origin}/#/a/${s.application_id}/${s.token}`;
 }
 
 export function clearSession(): void {
