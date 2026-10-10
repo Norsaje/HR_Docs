@@ -33,3 +33,7 @@ dist/
 *.swp
 .DS_Store
 Thumbs.db
+
+# служебное
+START.md
+.claude/

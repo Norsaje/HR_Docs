@@ -1,0 +1,15 @@
+# Всё, что исполняется в Linux-контейнерах, — только с LF, иначе «bad interpreter».
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+Caddyfile text eol=lf
+Makefile text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.onnx binary
