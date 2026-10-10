@@ -8,7 +8,7 @@ PY ?= $(shell command -v python3 >/dev/null 2>&1 && echo python3 || echo python)
 COMPOSE := docker compose
 LLM_LOCAL := -f docker-compose.yml -f infra/llm/compose.llm-local.yml --profile llm-local
 
-.PHONY: help secrets up down logs ps test lint api-types e2e-smoke restart-drill open-set eval \
+.PHONY: help secrets up down logs ps test lint api-types e2e-smoke restart-drill open-set test-files demo-seed eval \
         experiments llm-smoke switch-llm kc-admin-tunnel-help
 
 help: ## Показать цели
@@ -46,6 +46,12 @@ e2e-smoke: ## Сквозной сценарий: заявка -> файл -> р�
 
 restart-drill: ## 20 файлов, убить воркер посреди разбора, поднять, все дошли до финального статуса
 	cd backend && PYTHONIOENCODING=utf-8 uv run python -W ignore ../scripts/run_open_set.py --drill --limit=20
+
+test-files: ## Тестовые файлы для ручной проверки в data/test (виды документов, fake, big, blurry, dark, истёкшие)
+	cd backend && PYTHONIOENCODING=utf-8 uv run python -W ignore ../scripts/make_test_files.py
+
+demo-seed: ## Демо-заявки через настоящий API и модель (RU, UZ, BY) из data/test
+	cd backend && PYTHONIOENCODING=utf-8 uv run python -W ignore ../scripts/demo_seed.py
 
 open-set: ## Прогнать весь открытый набор через API и показать статусы по видам документов
 	cd backend && PYTHONIOENCODING=utf-8 uv run python -W ignore ../scripts/run_open_set.py
