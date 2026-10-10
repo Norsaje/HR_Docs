@@ -42,6 +42,7 @@ export type AppState = {
   status: string;
   documents: AppDocument[];
   missing: string[];
+  email_confirmed?: boolean;
 };
 
 export class ApiError extends Error {

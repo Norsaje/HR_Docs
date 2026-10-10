@@ -654,6 +654,13 @@ function ApplicationScreen({
         </div>
       )}
 
+      {state && (
+        <p className="muted" data-testid="email-status">
+          {state.email_confirmed
+            ? "✓ Email подтверждён — уведомления будут приходить на него."
+            : "Мы отправили письмо со ссылкой для подтверждения email — откройте его и перейдите по ссылке."}
+        </p>
+      )}
       {(missing.length > 0 || unreadable.length > 0) && (
         <div className="card alert-card" role="status">
           <h3>{isSubmitted ? "Нужно дослать" : "Осталось загрузить"}</h3>
