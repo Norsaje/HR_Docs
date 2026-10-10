@@ -59,8 +59,8 @@ experiments: ## Эксперименты фазы 0 с моделью и OCR (ev
 llm-smoke: ## Один синтетический документ через текущий LLM_BASE_URL (изнутри контейнера worker)
 	docker compose exec -T worker python -m app.llm.smoke
 
-switch-llm: ## Переключить провайдера модели: make switch-llm TARGET=local|ilons
-	@echo "не реализовано (фаза 4)"; exit 1
+switch-llm: ## Переключить провайдера модели: make switch-llm TARGET=local|ilons (правит .env, пересоздаёт worker)
+	@P=$$(python3 -c "" >/dev/null 2>&1 && echo python3 || echo python); $$P -I scripts/switch_llm.py $(TARGET)
 
 kc-admin-tunnel-help: ## Команды SSH-туннеля к админке Keycloak и Mailpit
 	@echo "Админка Keycloak и Mailpit слушают только 127.0.0.1 стенда."
