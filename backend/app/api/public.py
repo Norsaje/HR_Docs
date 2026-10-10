@@ -215,9 +215,9 @@ async def submit(
 async def get_application(
     request: Request, app_id: str, x_application_token: str | None = Header(default=None)
 ) -> dict[str, Any]:
+    row = await load_app(request, app_id, x_application_token)  # сначала токен, потом всё остальное
     st = request.app.state
     reg = st.registry
-    row = await load_app(request, app_id, x_application_token)
     docs = {
         r["doc_type"]: r
         for r in await st.pool.fetch("SELECT * FROM documents WHERE application_id=$1", row["id"])

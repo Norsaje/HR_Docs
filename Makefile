@@ -8,7 +8,7 @@ PY ?= $(shell command -v python3 >/dev/null 2>&1 && echo python3 || echo python)
 COMPOSE := docker compose
 LLM_LOCAL := -f docker-compose.yml -f infra/llm/compose.llm-local.yml --profile llm-local
 
-.PHONY: help secrets up down logs ps test lint api-types e2e-smoke restart-drill eval \
+.PHONY: help secrets up down logs ps test lint api-types e2e-smoke restart-drill open-set eval \
         experiments llm-smoke switch-llm kc-admin-tunnel-help
 
 help: ## Показать цели
@@ -42,10 +42,13 @@ api-types: ## OpenAPI бэкенда -> TS-типы для обоих фронт
 	@echo "не реализовано (фаза 1)"; exit 1
 
 e2e-smoke: ## Сквозной сценарий: заявка -> файл -> разбор -> вход оператора -> 401 без cookie
-	@echo "не реализовано (фаза 1)"; exit 1
+	cd backend && PYTHONIOENCODING=utf-8 uv run python -W ignore ../scripts/e2e_smoke.py
 
-restart-drill: ## 20 файлов, убить воркер, поднять, все дошли до финального статуса
-	@echo "не реализовано (фаза 1)"; exit 1
+restart-drill: ## 20 файлов, убить воркер посреди разбора, поднять, все дошли до финального статуса
+	cd backend && PYTHONIOENCODING=utf-8 uv run python -W ignore ../scripts/run_open_set.py --drill --limit=20
+
+open-set: ## Прогнать весь открытый набор через API и показать статусы по видам документов
+	cd backend && PYTHONIOENCODING=utf-8 uv run python -W ignore ../scripts/run_open_set.py
 
 eval: ## Оценка качества: make eval [SPLIT=dev|holdout|distorted|all] [LIMIT=N]
 	@echo "не реализовано (фаза 2)"; exit 1
