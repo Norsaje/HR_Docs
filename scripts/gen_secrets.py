@@ -47,7 +47,8 @@ GENERATORS = {
     "S3_ACCESS_KEY": lambda: _hex(10),
     "S3_SECRET_KEY": _hex,
     "FILE_ENC_MASTER_KEY": _b64key,
-    "KC_BOOTSTRAP_ADMIN_USERNAME": lambda: "kcadmin",
+    # Имя администратора master realm тоже случайное: предсказуемый логин облегчает перебор.
+    "KC_BOOTSTRAP_ADMIN_USERNAME": lambda: "kcadmin-" + secrets.token_hex(3),
     "KC_BOOTSTRAP_ADMIN_PASSWORD": _hex,
     "KC_BFF_CLIENT_SECRET": _hex,
     "KC_ADMIN_CLIENT_SECRET": _hex,
