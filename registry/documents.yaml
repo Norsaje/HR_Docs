@@ -212,7 +212,7 @@ documents:
       region:          {label: Регион действия, type: text, max_len: 120}
       surname:         {label: Фамилия, type: name}
       given_name:      {label: Имя, type: name}
-      passport_number: {label: Документ, удостоверяющий личность (номер), type: code}
+      passport_number: {label: "Документ, удостоверяющий личность (номер)", type: code}
       inn:             {label: ИНН, type: digits, length: 12}
     rules:
       - {id: wp_not_expired, field: valid_until, check: not_expired, severity: error, message: "Срок действия патента истёк {date}", applicant_message: "Срок действия патента истёк. Документ принят, оператор свяжется с вами."}
