@@ -29,11 +29,23 @@ country_groups:
   ru:
     title: Россия
     countries: [RU]
-    documents: [ru_passport, snils, inn]
+    documents: [ru_passport, snils, inn, ru_driver_license]
   uz:
     title: Узбекистан
     countries: [UZ]
     documents: [uz_passport, migration_card, work_patent]
+  kg:
+    title: Киргизия
+    countries: [KG]
+    documents: [kg_driver_license]
+  by:
+    title: Беларусь
+    countries: [BY]
+    documents: [by_passport]
+  in:
+    title: Индия
+    countries: [IN]
+    documents: [in_passport]
   eu:
     title: Европейский союз
     countries: [AT, BE, BG, HR, CY, CZ, DK, EE, FI, FR, DE, GR, HU, IE, IT, LV, LT, LU, MT, NL, PL, PT, RO, SK, SI, ES, SE]
@@ -42,6 +54,9 @@ country_groups:
 country_names:
   RU: Россия
   UZ: Узбекистан
+  KG: Киргизия
+  BY: Беларусь
+  IN: Индия
   AT: Австрия
   BE: Бельгия
   BG: Болгария
@@ -269,6 +284,108 @@ documents:
       - {id: rp_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "ВНЖ истекает {date} (через {days} дн.)"}
       - {id: rp_issue_before_expiry, field: expiry_date, check: after_field, other: issue_date, severity: warning, message: "Срок действия раньше даты выдачи"}
       - {id: rp_type_known, field: permit_type, check: in_values, severity: info, message: "Тип разрешения не распознан — укажите вручную"}
+
+  ru_driver_license:
+    title: Водительское удостоверение РФ
+    applicant_hint: "Обе стороны удостоверения: лицевую (с фото) и оборот (категории). Без бликов на пластике."
+    required: false
+    max_files: 2
+    mrz: []
+    has_photo: true
+    min_fields: [number, surname]
+    expiry_field: expiry_date
+    fields:
+      surname:     {label: Фамилия, type: name, prompt_hint: "строка 1"}
+      given_name:  {label: Имя и отчество, type: name, prompt_hint: "строка 2"}
+      birth_date:  {label: Дата рождения, type: date, date_role: birth, prompt_hint: "строка 3"}
+      birth_place: {label: Место рождения, type: text, max_len: 200}
+      issue_date:  {label: Дата выдачи, type: date, date_role: issue, prompt_hint: "строка 4a"}
+      expiry_date: {label: Действует до, type: date, date_role: expiry, prompt_hint: "строка 4b"}
+      issued_by:   {label: Кем выдано, type: text, max_len: 200, prompt_hint: "строка 4c"}
+      number:      {label: Серия и номер, type: digits, length: 10, prompt_hint: "строка 5: 10 цифр (серия 4 цифры и номер 6 цифр)"}
+      categories:  {label: Категории, type: text, max_len: 60, prompt_hint: "строка 9 или таблица категорий на обороте"}
+    rules:
+      - {id: rdl_number_len, field: number, check: length, value: 10, severity: warning, message: "Серия и номер ВУ РФ — 10 цифр"}
+      - {id: rdl_not_expired, field: expiry_date, check: not_expired, severity: error, message: "Срок действия водительского удостоверения истёк {date}", applicant_message: "Срок действия водительского удостоверения истёк. Документ принят, оператор свяжется с вами."}
+      - {id: rdl_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "Удостоверение истекает {date} (через {days} дн.)"}
+      - {id: rdl_birth_not_future, field: birth_date, check: not_in_future, severity: error, message: "Дата рождения в будущем — проверьте распознавание"}
+      - {id: rdl_after_issue, field: expiry_date, check: after_field, other: issue_date, severity: warning, message: "Срок действия раньше даты выдачи"}
+
+  kg_driver_license:
+    title: Водительское удостоверение Киргизии
+    applicant_hint: "Лицевая сторона удостоверения целиком; если есть оборот с категориями — добавьте вторым файлом."
+    required: true
+    max_files: 2
+    mrz: []
+    has_photo: true
+    min_fields: [number, surname]
+    expiry_field: expiry_date
+    fields:
+      surname:     {label: Фамилия, type: name}
+      given_name:  {label: Имя, type: name}
+      birth_date:  {label: Дата рождения, type: date, date_role: birth}
+      issue_date:  {label: Дата выдачи, type: date, date_role: issue}
+      expiry_date: {label: Действует до, type: date, date_role: expiry}
+      number:      {label: Номер удостоверения, type: code}
+      categories:  {label: Категории, type: text, max_len: 60}
+    rules:
+      - {id: kgdl_not_expired, field: expiry_date, check: not_expired, severity: error, message: "Срок действия удостоверения истёк {date}", applicant_message: "Срок действия удостоверения истёк. Документ принят, оператор свяжется с вами."}
+      - {id: kgdl_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "Удостоверение истекает {date} (через {days} дн.)"}
+      - {id: kgdl_birth_not_future, field: birth_date, check: not_in_future, severity: error, message: "Дата рождения в будущем — проверьте распознавание"}
+      - {id: kgdl_after_issue, field: expiry_date, check: after_field, other: issue_date, severity: warning, message: "Срок действия раньше даты выдачи"}
+
+  by_passport:
+    title: Паспорт гражданина Беларуси
+    applicant_hint: "Страница с фото и машиночитаемой зоной (строки со знаками <<<) целиком, без бликов."
+    required: true
+    max_files: 2
+    mrz: [td3]
+    has_photo: true
+    min_fields: [number, surname, given_name]
+    expiry_field: expiry_date
+    fields:
+      number:          {label: Номер паспорта, type: code, prompt_hint: "2 латинские буквы и 7 цифр"}
+      surname:         {label: Фамилия, type: latin_name, prompt_hint: "латиницей, как в документе"}
+      given_name:      {label: Имя, type: latin_name, prompt_hint: "латиницей, как в документе"}
+      birth_date:      {label: Дата рождения, type: date, date_role: birth}
+      sex:             {label: Пол, type: enum, values: {M: "муж.", F: "жен."}}
+      nationality:     {label: Гражданство, type: code}
+      personal_number: {label: Идентификационный номер, type: code}
+      issue_date:      {label: Дата выдачи, type: date, date_role: issue}
+      expiry_date:     {label: Срок действия, type: date, date_role: expiry}
+    rules:
+      - {id: by_number_fmt, field: number, check: pattern, value: '^[A-Z]{2}\d{7}$', severity: warning, message: "Номер паспорта Беларуси обычно — 2 буквы и 7 цифр"}
+      - {id: by_not_expired, field: expiry_date, check: not_expired, severity: error, message: "Срок действия паспорта истёк {date}", applicant_message: "Срок действия паспорта истёк. Документ принят, оператор свяжется с вами."}
+      - {id: by_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "Паспорт истекает {date} (через {days} дн.)"}
+      - {id: by_birth_not_future, field: birth_date, check: not_in_future, severity: error, message: "Дата рождения в будущем — проверьте распознавание"}
+      - {id: by_latin, field: surname, check: latin_only, severity: warning, message: "В фамилии есть нелатинские символы"}
+
+  in_passport:
+    title: Паспорт гражданина Индии
+    applicant_hint: "Страница с фото и машиночитаемой зоной (строки со знаками <<<) целиком."
+    required: true
+    max_files: 2
+    mrz: [td3]
+    has_photo: true
+    min_fields: [number, surname, given_name]
+    expiry_field: expiry_date
+    fields:
+      number:      {label: Номер паспорта, type: code, prompt_hint: "1 латинская буква и 7 цифр"}
+      surname:     {label: Фамилия, type: latin_name}
+      given_name:  {label: Имя, type: latin_name}
+      birth_date:  {label: Дата рождения, type: date, date_role: birth}
+      sex:         {label: Пол, type: enum, values: {M: "муж.", F: "жен."}}
+      nationality: {label: Гражданство, type: code}
+      birth_place: {label: Место рождения, type: text, max_len: 120}
+      issue_place: {label: Место выдачи, type: text, max_len: 120}
+      issue_date:  {label: Дата выдачи, type: date, date_role: issue}
+      expiry_date: {label: Срок действия, type: date, date_role: expiry}
+    rules:
+      - {id: in_number_fmt, field: number, check: pattern, value: '^[A-Z]\d{7}$', severity: warning, message: "Номер паспорта Индии обычно — 1 буква и 7 цифр"}
+      - {id: in_not_expired, field: expiry_date, check: not_expired, severity: error, message: "Срок действия паспорта истёк {date}", applicant_message: "Срок действия паспорта истёк. Документ принят, оператор свяжется с вами."}
+      - {id: in_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "Паспорт истекает {date} (через {days} дн.)"}
+      - {id: in_birth_not_future, field: birth_date, check: not_in_future, severity: error, message: "Дата рождения в будущем — проверьте распознавание"}
+      - {id: in_after_issue, field: expiry_date, check: after_field, other: issue_date, severity: warning, message: "Срок действия раньше даты выдачи"}
 
 # Сверка между документами одной заявки (app/pipeline/crosscheck.py)
 crosschecks:
