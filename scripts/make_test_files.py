@@ -25,6 +25,42 @@ KINDS = ["ru_passport", "snils", "inn", "ru_driver_license", "work_patent", "kg_
          "by_passport", "in_passport"]
 
 
+# data/test_1 — ровно те файлы, что используются в README («Полный проход»), по папке на заявку.
+P1, P2 = "Первый пакет", "Второй пакет"
+WALK = {
+    "01_Россия_Алексеева": [(P1, "Паспорт РФ Алексеева Анастасия Игоревна.jpg", "паспорт.jpg"),
+                           (P1, "СНИЛС Алексеева Анастасия Игоревна.jpg", "снилс.jpg"),
+                           (P1, "ИНН Алексеева Анастасия Игоревна.png", "инн.png")],
+    "02_Россия_Киселев": [(P1, "Паспорт РФ Киселев Максим Васильевич.jpg", "паспорт.jpg"),
+                         (P1, "СНИЛС Киселев Максим Васильевич.jpg", "снилс.jpg"),
+                         (P1, "ИНН Киселев Максим Васильевич.jpeg", "инн_дозагрузить_по_ссылке.jpeg")],
+    "03_Россия_Морозов": [(P2, "Паспорт РФ Морозов Виталий Михайлович.jpg", "паспорт_1.jpg"),
+                         (P2, "Паспорт РФ Морозов Виталий Михайлович (повторное фото).jpg", "паспорт_2.jpg"),
+                         (P1, "Размытое фото документа.jpg", "снилс_размытое.jpg"),
+                         (P2, "Тёмное фото документа.jpg", "инн_тёмное.jpg"),
+                         (P2, "ВУ РФ (лицо) Сидоров Максим Артемович.jpg", "ву_рф.jpg")],
+    "04_Узбекистан_Hakimov": [(P1, "Патент (лицо) Hakimov Timur.jpg", "патент_лицо.jpg"),
+                              (P1, "Патент (оборот) Hakimov Timur.png", "патент_оборот.png")],
+    "05_Беларусь_Sidarenka": [(P1, "Паспорт Беларуси Sidarenka Andrei.jpeg", "паспорт_истёк.jpeg")],
+    "06_Киргизия_Mamytov": [(P1, "ВУ Киргизии Mamytov Bakyt.pdf", "ву_киргизии.pdf")],
+    "07_Индия_Patel": [(P1, "Паспорт Индии Anil Patel.jpg", "паспорт.jpg")],
+    "08_Россия_Соколов": [(P2, "Паспорт РФ - страница прописки (не тот документ).jpg", "паспорт_не_та_страница.jpg"),
+                         (P1, "Чек (не документ).jpeg", "инн_чек.jpeg"),
+                         (P1, "ВУ РФ (лицо) Соколов Артем Геннадьевич.jpeg", "снилс_а_на_самом_деле_ву.jpeg")],
+}
+
+
+def make_walkthrough_set() -> None:
+    out = ROOT / "data" / "test_1"
+    for folder, files in WALK.items():
+        (out / folder).mkdir(parents=True, exist_ok=True)
+        for pack, src, dst in files:
+            shutil.copyfile(ROOT / "data" / "open" / pack / src, out / folder / dst)
+    for name in ("fake.jpg", "big.jpg"):  # отказы: не картинка и больше 20 МБ
+        shutil.copyfile(OUT / name, out / name)
+    print(f"data/test_1: {len(WALK)} папок-заявок для README + fake.jpg, big.jpg")
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     samples = load_samples()
@@ -66,6 +102,7 @@ def main() -> int:
             shutil.copyfile(src, OUT / f"expired_{doc_type}_{expired}{src.suffix.lower()}")
     print(f"data/test: {n} файлов документов, wrong_page, receipt, fake.jpg, big.jpg, blurry.jpg, dark.jpg; "
           f"истёкших: {expired}" + ("" if expired else " (стенд ещё не находил истёкших документов в наборе)"))
+    make_walkthrough_set()
     return 0
 
 
