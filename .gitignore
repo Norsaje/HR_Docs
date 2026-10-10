@@ -1,0 +1,35 @@
+# секреты
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# данные и артефакты
+data/
+backups/
+eval/cache/
+*.dump
+*.sql.gz
+*.zip
+*.tar.gz
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE и ОС
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

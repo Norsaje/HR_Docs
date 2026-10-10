@@ -1,0 +1,150 @@
+{
+  "realm": "hr",
+  "enabled": true,
+  "displayName": "Приём документов — вход для сотрудников",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "passwordPolicy": "length(12) and notUsername",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["ru", "en"],
+  "defaultLocale": "ru",
+  "roles": {
+    "client": {
+      "operator-bff": [
+        {"name": "doc-reader", "description": "Просмотр заявок и документов своего офиса"},
+        {"name": "doc-editor", "description": "Правка полей, повторный разбор, отметка «проверено», выгрузки — в своём офисе"},
+        {"name": "supervisor", "description": "Все офисы, журнал системы, сотрудники, удаление данных"}
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "offices",
+      "path": "/offices",
+      "subGroups": [
+        {"name": "moscow", "path": "/offices/moscow"},
+        {"name": "spb", "path": "/offices/spb"}
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "operator-bff",
+      "name": "Рабочее место оператора (BFF)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KC_BFF_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": ["${PUBLIC_BASE_URL}/api/auth/callback"],
+      "webOrigins": ["${PUBLIC_BASE_URL}"],
+      "rootUrl": "${PUBLIC_BASE_URL}",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${PUBLIC_BASE_URL}/operator/",
+        "backchannel.logout.url": "http://api:8000/api/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email", "basic"],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "operator-admin",
+      "name": "Сервисный клиент: управление сотрудниками (раздел «Сотрудники»)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KC_ADMIN_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": ["roles", "basic"]
+    }
+  ],
+  "users": [
+    {
+      "username": "reader.msk",
+      "enabled": true,
+      "firstName": "Ирина",
+      "lastName": "Читалова",
+      "email": "reader.msk@example.test",
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "${KC_DEMO_PASSWORD}", "temporary": false}],
+      "clientRoles": {"operator-bff": ["doc-reader"]},
+      "groups": ["/offices/moscow"]
+    },
+    {
+      "username": "editor.msk",
+      "enabled": true,
+      "firstName": "Олег",
+      "lastName": "Правкин",
+      "email": "editor.msk@example.test",
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "${KC_DEMO_PASSWORD}", "temporary": false}],
+      "clientRoles": {"operator-bff": ["doc-editor"]},
+      "groups": ["/offices/moscow"]
+    },
+    {
+      "username": "editor.spb",
+      "enabled": true,
+      "firstName": "Анна",
+      "lastName": "Невская",
+      "email": "editor.spb@example.test",
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "${KC_DEMO_PASSWORD}", "temporary": false}],
+      "clientRoles": {"operator-bff": ["doc-editor"]},
+      "groups": ["/offices/spb"]
+    },
+    {
+      "username": "supervisor",
+      "enabled": true,
+      "firstName": "Сергей",
+      "lastName": "Главный",
+      "email": "supervisor@example.test",
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "${KC_DEMO_PASSWORD}", "temporary": false}],
+      "clientRoles": {"operator-bff": ["supervisor"]},
+      "groups": []
+    },
+    {
+      "username": "service-account-operator-admin",
+      "enabled": true,
+      "serviceAccountClientId": "operator-admin",
+      "clientRoles": {"realm-management": ["manage-users", "view-users", "query-groups", "view-clients"]}
+    }
+  ]
+}

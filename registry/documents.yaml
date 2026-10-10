@@ -1,0 +1,278 @@
+# Реестр документов — единый источник истины.
+# Из него строятся: набор документов по стране, JSON-схема для модели, описание полей в промпте,
+# валидаторы, карточка оператора и выгрузки. Новое поле или правило на защите — правка здесь и перезапуск.
+# Файл проверяется Pydantic-моделью (app/registry/loader.py) при старте api и worker.
+#
+# Типы полей (type): digits | date | name | latin_name | code | text | enum
+#   digits     — нормализуется до цифр; length — точная длина (необязательно); min_len/max_len
+#   date       — нормализуется в ISO; date_role: birth | issue | expiry | entry | other (для разворота YY)
+#   name       — ФИО на кириллице или латинице; верхний регистр, Ё→Е
+#   latin_name — то же, но допускается только латиница (Unicode Latin с диакритикой)
+#   code       — буквы и цифры, верхний регистр, без пробелов; pattern — регулярка ПОСЛЕ генерации
+#   text       — свободный текст, сжатие пробелов
+#   enum       — значение из values; у модели всегда есть вариант "other"
+# Правила (rules[].check) — закрытый набор из app/registry/rules.py:
+#   pattern, length, not_in_future, not_expired, expires_within, after_field, before_field,
+#   max_months_after, min_age_at_issue, ru_passport_age_validity, latin_only, cyrillic_only,
+#   in_values, checksum_inn12, checksum_snils, iso_alpha3
+# severity: error | warning | info. message — текст для оператора; applicant_message — безопасный текст для соискателя.
+
+version: 1
+timezone: Europe/Moscow
+expiry_warning_days: 30
+
+offices:
+  - {slug: moscow, name: "Офис «Москва»", default: true}
+  - {slug: spb, name: "Офис «Санкт-Петербург»"}
+
+country_groups:
+  ru:
+    title: Россия
+    countries: [RU]
+    documents: [ru_passport, snils, inn]
+  uz:
+    title: Узбекистан
+    countries: [UZ]
+    documents: [uz_passport, migration_card, work_patent]
+  eu:
+    title: Европейский союз
+    countries: [AT, BE, BG, HR, CY, CZ, DK, EE, FI, FR, DE, GR, HU, IE, IT, LV, LT, LU, MT, NL, PL, PT, RO, SK, SI, ES, SE]
+    documents: [eu_id, residence_permit]
+
+country_names:
+  RU: Россия
+  UZ: Узбекистан
+  AT: Австрия
+  BE: Бельгия
+  BG: Болгария
+  HR: Хорватия
+  CY: Кипр
+  CZ: Чехия
+  DK: Дания
+  EE: Эстония
+  FI: Финляндия
+  FR: Франция
+  DE: Германия
+  GR: Греция
+  HU: Венгрия
+  IE: Ирландия
+  IT: Италия
+  LV: Латвия
+  LT: Литва
+  LU: Люксембург
+  MT: Мальта
+  NL: Нидерланды
+  PL: Польша
+  PT: Португалия
+  RO: Румыния
+  SK: Словакия
+  SI: Словения
+  ES: Испания
+  SE: Швеция
+
+eu_alpha3: [AUT, BEL, BGR, HRV, CYP, CZE, DNK, EST, FIN, FRA, D, GRC, HUN, IRL, ITA, LVA, LTU, LUX, MLT, NLD, POL, PRT, ROU, SVK, SVN, ESP, SWE]
+
+documents:
+
+  ru_passport:
+    title: Паспорт РФ, главный разворот
+    applicant_hint: "Разворот со страницами 2–3 целиком: и фото, и данные о выдаче. Без вспышки, все четыре угла в кадре."
+    required: true
+    max_files: 4
+    mrz: [ru_internal]
+    has_photo: true
+    min_fields: [series, number, surname, given_name, birth_date]
+    expiry_field: null
+    fields:
+      series:          {label: Серия, type: digits, length: 4, prompt_hint: "4 цифры серии; часто напечатаны вертикально на полях страниц, красным"}
+      number:          {label: Номер, type: digits, length: 6, prompt_hint: "6 цифр номера рядом с серией"}
+      surname:         {label: Фамилия, type: name}
+      given_name:      {label: Имя, type: name}
+      patronymic:      {label: Отчество, type: name}
+      sex:             {label: Пол, type: enum, values: {M: "муж.", F: "жен."}}
+      birth_date:      {label: Дата рождения, type: date, date_role: birth}
+      birth_place:     {label: Место рождения, type: text, max_len: 200}
+      issued_by:       {label: Кем выдан, type: text, max_len: 300}
+      issue_date:      {label: Дата выдачи, type: date, date_role: issue}
+      department_code: {label: Код подразделения, type: code, pattern: '^\d{3}-\d{3}$', prompt_hint: "формат 000-000"}
+    rules:
+      - {id: series_fmt, field: series, check: length, value: 4, severity: error, message: "Серия должна состоять из 4 цифр"}
+      - {id: number_fmt, field: number, check: length, value: 6, severity: error, message: "Номер должен состоять из 6 цифр"}
+      - {id: birth_not_future, field: birth_date, check: not_in_future, severity: error, message: "Дата рождения в будущем — проверьте распознавание"}
+      - {id: issue_not_future, field: issue_date, check: not_in_future, severity: error, message: "Дата выдачи в будущем"}
+      - {id: issue_after_14, field: issue_date, check: min_age_at_issue, value: 14, other: birth_date, severity: warning, message: "Паспорт выдан раньше 14 лет — проверьте даты"}
+      - {id: dept_code_fmt, field: department_code, check: pattern, value: '^\d{3}-\d{3}$', severity: warning, message: "Код подразделения должен быть в формате 000-000"}
+      - {id: age_validity, field: issue_date, check: ru_passport_age_validity, other: birth_date, severity: warning, message: "Паспорт, вероятно, подлежал замене в {age} лет"}
+      - {id: names_cyr, field: surname, check: cyrillic_only, severity: warning, message: "В фамилии есть символы не кириллицы"}
+
+  snils:
+    title: СНИЛС
+    applicant_hint: "Зелёная карточка СНИЛС или уведомление (АДИ-РЕГ). Подойдёт PDF с Госуслуг."
+    required: true
+    max_files: 2
+    mrz: []
+    has_photo: false
+    min_fields: [number]
+    expiry_field: null
+    fields:
+      number:     {label: Номер СНИЛС, type: digits, length: 11, display_format: "###-###-### ##", prompt_hint: "формат 000-000-000 00"}
+      surname:    {label: Фамилия, type: name}
+      given_name: {label: Имя, type: name}
+      patronymic: {label: Отчество, type: name}
+    rules:
+      - {id: snils_len, field: number, check: length, value: 11, severity: error, message: "Номер СНИЛС должен состоять из 11 цифр"}
+      - {id: snils_checksum, field: number, check: checksum_snils, severity: error, message: "Контрольное число СНИЛС не сходится — номер прочитан с ошибкой или неверен"}
+
+  inn:
+    title: ИНН физического лица
+    applicant_hint: "Свидетельство или уведомление о постановке на учёт. Лучше PDF с Госуслуг или из личного кабинета налогоплательщика."
+    required: true
+    max_files: 2
+    mrz: []
+    has_photo: false
+    min_fields: [number]
+    expiry_field: null
+    fields:
+      number:     {label: ИНН, type: digits, length: 12, prompt_hint: "12 цифр"}
+      surname:    {label: Фамилия, type: name}
+      given_name: {label: Имя, type: name}
+      patronymic: {label: Отчество, type: name}
+      issue_date: {label: Дата выдачи, type: date, date_role: issue}
+    rules:
+      - {id: inn_len, field: number, check: length, value: 12, severity: error, message: "ИНН физлица должен состоять из 12 цифр"}
+      - {id: inn_checksum, field: number, check: checksum_inn12, severity: error, message: "Контрольные разряды ИНН не сходятся — номер прочитан с ошибкой или неверен"}
+      - {id: inn_issue_not_future, field: issue_date, check: not_in_future, severity: error, message: "Дата выдачи в будущем"}
+
+  uz_passport:
+    title: Паспорт гражданина Узбекистана
+    applicant_hint: "Страница с фото и машиночитаемой зоной (две строки со знаками <<<). Для ID-карты загрузите обе стороны."
+    required: true
+    max_files: 3
+    mrz: [td3, td1]
+    has_photo: true
+    min_fields: [number, surname, given_name]
+    expiry_field: expiry_date
+    fields:
+      number:          {label: Номер паспорта, type: code, pattern: '^[A-Z]{2}\d{7}$', prompt_hint: "2 латинские буквы и 7 цифр"}
+      surname:         {label: Фамилия, type: latin_name}
+      given_name:      {label: Имя, type: latin_name}
+      patronymic:      {label: Отчество, type: latin_name}
+      birth_date:      {label: Дата рождения, type: date, date_role: birth}
+      sex:             {label: Пол, type: enum, values: {M: "муж.", F: "жен."}}
+      nationality:     {label: Гражданство, type: code, pattern: '^[A-Z]{1,3}$'}
+      personal_number: {label: ПИНФЛ, type: digits, length: 14}
+      issue_date:      {label: Дата выдачи, type: date, date_role: issue}
+      expiry_date:     {label: Срок действия, type: date, date_role: expiry}
+    rules:
+      - {id: uz_number_fmt, field: number, check: pattern, value: '^[A-Z]{2}\d{7}$', severity: warning, message: "Номер паспорта Узбекистана обычно — 2 буквы и 7 цифр"}
+      - {id: uz_not_expired, field: expiry_date, check: not_expired, severity: error, message: "Срок действия паспорта истёк {date}", applicant_message: "Срок действия паспорта истёк. Документ принят, оператор свяжется с вами."}
+      - {id: uz_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "Паспорт истекает {date} (через {days} дн.)"}
+      - {id: uz_expiry_after_issue, field: expiry_date, check: after_field, other: issue_date, severity: warning, message: "Срок действия раньше даты выдачи"}
+      - {id: uz_birth_not_future, field: birth_date, check: not_in_future, severity: error, message: "Дата рождения в будущем — проверьте распознавание"}
+      - {id: uz_latin, field: surname, check: latin_only, severity: warning, message: "В фамилии есть нелатинские символы"}
+
+  migration_card:
+    title: Миграционная карта
+    applicant_hint: "Обе части карты, если есть отметки на обороте. Штамп о въезде должен быть читаемым."
+    required: true
+    max_files: 2
+    mrz: []
+    has_photo: false
+    min_fields: [number]
+    expiry_field: stay_until
+    fields:
+      series:          {label: Серия, type: code}
+      number:          {label: Номер, type: digits, min_len: 7, max_len: 10}
+      entry_date:      {label: Дата въезда, type: date, date_role: entry, prompt_hint: "дата въезда из поля «с» или из штампа пограничного контроля"}
+      stay_until:      {label: Действует до, type: date, date_role: expiry, prompt_hint: "срок пребывания «до»"}
+      surname:         {label: Фамилия, type: name}
+      given_name:      {label: Имя, type: name}
+      passport_number: {label: Номер паспорта (в карте), type: code}
+      visit_purpose:   {label: Цель визита, type: enum, values: {work: "работа", private: "частная", study: "учёба", tourism: "туризм", business: "деловая", other: "другое"}}
+    rules:
+      - {id: mc_number_len, field: number, check: length, min: 7, max: 10, severity: warning, message: "Номер миграционной карты обычно содержит 7–10 цифр"}
+      - {id: mc_entry_not_future, field: entry_date, check: not_in_future, severity: error, message: "Дата въезда в будущем — проверьте распознавание"}
+      - {id: mc_stay_after_entry, field: stay_until, check: after_field, other: entry_date, severity: warning, message: "«Действует до» раньше даты въезда"}
+      - {id: mc_stay_expired, field: stay_until, check: not_expired, severity: warning, message: "Срок пребывания по миграционной карте истёк {date}", applicant_message: "Срок пребывания по миграционной карте истёк. Документ принят, оператор свяжется с вами."}
+
+  work_patent:
+    title: Патент на работу
+    applicant_hint: "Лицевая сторона патента целиком. Если есть оборот с отметками — добавьте вторым файлом."
+    required: true
+    max_files: 3
+    mrz: []
+    has_photo: true
+    min_fields: [number, valid_until]
+    expiry_field: valid_until
+    fields:
+      series:          {label: Серия, type: code, prompt_hint: "обычно 2 цифры кода региона"}
+      number:          {label: Номер, type: digits, min_len: 6, max_len: 12}
+      issue_date:      {label: Дата выдачи, type: date, date_role: issue}
+      valid_until:     {label: Действует до, type: date, date_role: expiry, prompt_hint: "срок действия, если он напечатан на бланке; если на бланке нет — status=absent"}
+      region:          {label: Регион действия, type: text, max_len: 120}
+      surname:         {label: Фамилия, type: name}
+      given_name:      {label: Имя, type: name}
+      passport_number: {label: Документ, удостоверяющий личность (номер), type: code}
+      inn:             {label: ИНН, type: digits, length: 12}
+    rules:
+      - {id: wp_not_expired, field: valid_until, check: not_expired, severity: error, message: "Срок действия патента истёк {date}", applicant_message: "Срок действия патента истёк. Документ принят, оператор свяжется с вами."}
+      - {id: wp_expires_soon, field: valid_until, check: expires_within, severity: warning, message: "Патент истекает {date} (через {days} дн.)"}
+      - {id: wp_issue_not_future, field: issue_date, check: not_in_future, severity: error, message: "Дата выдачи в будущем"}
+      - {id: wp_valid_after_issue, field: valid_until, check: after_field, other: issue_date, severity: warning, message: "«Действует до» раньше даты выдачи"}
+      - {id: wp_max_12m, field: valid_until, check: max_months_after, value: 12, other: issue_date, severity: warning, message: "Срок патента больше 12 месяцев от даты выдачи — проверьте"}
+      - {id: wp_inn_checksum, field: inn, check: checksum_inn12, severity: warning, message: "Контрольные разряды ИНН в патенте не сходятся"}
+
+  eu_id:
+    title: Удостоверение личности или загранпаспорт гражданина ЕС
+    applicant_hint: "ID-карта — обе стороны; паспорт — страница с фото и машиночитаемой зоной."
+    required: true
+    max_files: 3
+    mrz: [td1, td3]
+    has_photo: true
+    min_fields: [number, surname, given_names]
+    expiry_field: expiry_date
+    fields:
+      doc_kind:    {label: Вид документа, type: enum, values: {id_card: "удостоверение личности", passport: "паспорт"}}
+      number:      {label: Номер документа, type: code}
+      surname:     {label: Фамилия, type: latin_name}
+      given_names: {label: Имя, type: latin_name}
+      birth_date:  {label: Дата рождения, type: date, date_role: birth}
+      nationality: {label: Гражданство, type: code, pattern: '^[A-Z]{1,3}$', prompt_hint: "трёхбуквенный код, как в документе (Германия — D)"}
+      expiry_date: {label: Срок действия, type: date, date_role: expiry}
+    rules:
+      - {id: eu_latin_surname, field: surname, check: latin_only, severity: error, message: "Фамилия должна быть записана латиницей"}
+      - {id: eu_latin_given, field: given_names, check: latin_only, severity: error, message: "Имя должно быть записано латиницей"}
+      - {id: eu_not_expired, field: expiry_date, check: not_expired, severity: error, message: "Срок действия документа истёк {date}", applicant_message: "Срок действия документа истёк. Документ принят, оператор свяжется с вами."}
+      - {id: eu_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "Документ истекает {date} (через {days} дн.)"}
+      - {id: eu_birth_not_future, field: birth_date, check: not_in_future, severity: error, message: "Дата рождения в будущем — проверьте распознавание"}
+      - {id: eu_nationality, field: nationality, check: iso_alpha3, value: eu, severity: warning, message: "Гражданство «{value}» не из списка стран ЕС"}
+
+  residence_permit:
+    title: Вид на жительство
+    applicant_hint: "Карта или страница с данными ВНЖ целиком; для карты — обе стороны."
+    required: true
+    max_files: 3
+    mrz: [td1]
+    has_photo: true
+    min_fields: [number, expiry_date]
+    expiry_field: expiry_date
+    fields:
+      number:      {label: Номер, type: code}
+      issue_date:  {label: Дата выдачи, type: date, date_role: issue}
+      expiry_date: {label: Срок действия, type: date, date_role: expiry}
+      permit_type: {label: Тип разрешения, type: enum, values: {permanent: "постоянный", temporary: "временный", eu_long_term: "долгосрочный резидент ЕС", eu_blue_card: "голубая карта ЕС", family: "воссоединение семьи", work: "работа", study: "учёба", other: "другое"}}
+      surname:     {label: Фамилия, type: latin_name}
+      given_names: {label: Имя, type: latin_name}
+      nationality: {label: Гражданство, type: code}
+    rules:
+      - {id: rp_not_expired, field: expiry_date, check: not_expired, severity: error, message: "Срок действия ВНЖ истёк {date}", applicant_message: "Срок действия вида на жительство истёк. Документ принят, оператор свяжется с вами."}
+      - {id: rp_expires_soon, field: expiry_date, check: expires_within, severity: warning, message: "ВНЖ истекает {date} (через {days} дн.)"}
+      - {id: rp_issue_before_expiry, field: expiry_date, check: after_field, other: issue_date, severity: warning, message: "Срок действия раньше даты выдачи"}
+      - {id: rp_type_known, field: permit_type, check: in_values, severity: info, message: "Тип разрешения не распознан — укажите вручную"}
+
+# Сверка между документами одной заявки (app/pipeline/crosscheck.py)
+crosschecks:
+  - {id: names_match, kind: names, documents: all, severity: warning, message: "ФИО различаются: «{a}» ({doc_a}) и «{b}» ({doc_b})"}
+  - {id: birth_date_match, kind: equal, field: birth_date, documents: all, severity: error, message: "Дата рождения различается: {a} ({doc_a}) и {b} ({doc_b})"}
+  - {id: passport_in_patent, kind: equal_ref, field: passport_number, ref: {uz_passport: number}, documents: [work_patent, migration_card], severity: warning, message: "Номер паспорта в документе «{doc_a}» ({a}) не совпадает с паспортом ({b})"}
+  - {id: entered_name, kind: entered_name, severity: info, message: "ФИО в анкете («{a}») отличается от ФИО в документе «{doc_b}» («{b}»)"}
