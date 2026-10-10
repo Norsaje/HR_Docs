@@ -1,0 +1,43 @@
+# Локальная модель на своей GPU (профиль llm-local): vLLM с OpenAI-совместимым API.
+# Подключение:
+#   docker compose -f docker-compose.yml -f infra/llm/compose.llm-local.yml --profile llm-local up -d vllm
+# Воркер ходит на http://vllm:8000/v1 по внутренней сети backend; наружу порт не публикуется.
+# Веса и имя модели — в .env (LOCAL_LLM_MODEL, LOCAL_LLM_SERVED_NAME, VLLM_API_KEY). См. docs/local-model.md.
+# ВНИМАНИЕ: на A10 этот файл ещё не проверялся (стенд без GPU) — см. docs/limitations.md.
+services:
+  vllm:
+    profiles: ["llm-local"]
+    image: vllm/vllm-openai:v0.11.0
+    command: >
+      --model ${LOCAL_LLM_MODEL:?задайте LOCAL_LLM_MODEL в .env}
+      --served-model-name ${LOCAL_LLM_SERVED_NAME:-local-qwen}
+      --max-model-len 16384 --max-num-seqs 4
+      --gpu-memory-utilization 0.92
+      --limit-mm-per-prompt.image 2
+      --enable-prefix-caching
+      --default-chat-template-kwargs '{"enable_thinking": false}'
+      --api-key ${VLLM_API_KEY:?задайте VLLM_API_KEY в .env (make secrets)}
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # egress нужен только для первого скачивания весов с Hugging Face.
+    networks: [backend, egress]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 600s
+
+volumes:
+  hf_cache:
