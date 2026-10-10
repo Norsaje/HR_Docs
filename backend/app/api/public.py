@@ -21,6 +21,8 @@ from pydantic import BaseModel
 from app.audit.log import audit
 from app.intake.service import accept_file
 from app.messages import AppError
+from app.notify.email import app_link
+from app.notify.email import send as send_mail
 
 router = APIRouter(prefix="/api/public")
 
@@ -207,6 +209,24 @@ async def submit(
             f"Заявка {row['public_no']} отправлена"
             + (f"; не хватает: {', '.join(missing)}" if missing else ""),
             application_id=row["id"],
+        )
+    if row["status"] == "draft":  # первое «Отправить» — письмо со ссылкой на заявку (дозагрузка по ней)
+        titles = [st.registry.documents[d].title for d in missing]
+        link = app_link(st.settings, row["id"], x_application_token)
+        lines = [
+            f"Здравствуйте, {row['full_name']}!",
+            "",
+            f"Заявка {row['public_no']} принята. Статус документов и дозагрузка — по ссылке:",
+            link,
+            "",
+            f"Не хватает: {', '.join(titles)}." if titles else "",
+            "Ссылка личная, не пересылайте её.",
+            "",
+            "Кадровое агентство",
+        ]
+        body = "\n".join(lines)
+        await send_mail(
+            st.pool, st.settings, row, "link", f"Заявка {row['public_no']} принята", body, actor="соискатель"
         )
     return {"public_no": row["public_no"], "missing": missing}
 

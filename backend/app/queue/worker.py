@@ -27,6 +27,7 @@ from app.llm.errors import ModelError
 from app.llm.gateway import Gateway
 from app.logging import get_logger, setup_logging
 from app.messages import MODEL_FAILURE_RU
+from app.notify.email import notify_problems
 from app.pipeline.run import process_file, recompute_application
 from app.registry.loader import Registry, get_registry
 from app.storage.s3 import Storage
@@ -119,6 +120,11 @@ class Worker:
             )
         finally:
             heartbeat.cancel()
+        if app_id:
+            try:  # письмо «не хватает / не прочиталось» — после разбора, не чаще раза в 10 минут
+                await notify_problems(self.pool, self.settings, self.registry, app_id)
+            except Exception:  # noqa: BLE001 — сбой почты не должен ронять воркер
+                log.exception("notify_failed")
 
     async def fail_or_retry(
         self,
