@@ -29,7 +29,8 @@ PERMISSIONS = {
     "documents:reprocess": {"doc-editor", "supervisor"},
     "exports": {"doc-editor", "supervisor"},
     "requests:send": {"doc-editor", "supervisor"},
-    "staff:manage": {"supervisor"},
+    # Редактор заводит сотрудников только своего офиса и только reader/editor (проверка — в staff_create).
+    "staff:manage": {"doc-editor", "supervisor"},
 }
 
 

@@ -1,14 +1,18 @@
 // Каркас рабочего места: проверка входа (/api/auth/me), шапка, навигация по hash и баннер
 // состояния модели. Маршруты: #/ — заявки (фильтры в query после #/?), #/app/<id> — карточка,
-// #/queue — «В работе», #/expiring — истекающие, #/staff — сотрудники (только supervisor).
+// #/queue — «В работе», #/expiring — истекающие, #/staff — сотрудники (supervisor и doc-editor своего офиса).
 // Hash-навигация выбрана, чтобы Caddy отдавал один index.html без настройки маршрутов.
 import { useEffect, useState } from "react";
-import { api, ApiError, isSupervisor, type Me, type ModelStatus } from "./api";
+import { api, ApiError, type Me, type ModelStatus } from "./api";
 import { ApplicationsPage } from "./pages/Applications";
 import { CardPage } from "./pages/Card";
 import { QueuePage } from "./pages/Queue";
 import { ExpiringPage } from "./pages/Expiring";
 import { StaffPage } from "./pages/Staff";
+
+// Заводить сотрудников могут руководитель и редактор (редактор — только в свой офис, проверяет сервер).
+const canManageStaff = (me: { roles: string[] }) =>
+  me.roles.includes("supervisor") || me.roles.includes("doc-editor");
 import { ToastProvider } from "./ui";
 
 function useHash(): string {
@@ -86,7 +90,7 @@ export function App() {
   } else if (path.startsWith("/expiring")) {
     page = <ExpiringPage />;
     active = "expiring";
-  } else if (path.startsWith("/staff") && isSupervisor(me)) {
+  } else if (path.startsWith("/staff") && canManageStaff(me)) {
     page = <StaffPage />;
     active = "staff";
   }
@@ -117,7 +121,7 @@ export function App() {
             >
               Истекающие
             </a>
-            {isSupervisor(me) && (
+            {canManageStaff(me) && (
               <a className={active === "staff" ? "active" : ""} href="#/staff">
                 Сотрудники
               </a>

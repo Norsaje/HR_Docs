@@ -277,6 +277,15 @@ async def staff_create(
         raise AppError("VALIDATION", 422, detail="неизвестный офис")
     if len(body.password) < 12:
         raise AppError("VALIDATION", 422, detail="пароль не короче 12 символов")
+    if not op.is_supervisor and (body.role == "supervisor" or body.office not in op.offices):
+        # Редактор не может выдать роль руководителя или завести сотрудника чужого офиса.
+        await audit(
+            request.app.state.pool,
+            op.name,
+            "access.denied",
+            f"Отказ: {op.name} пытался завести сотрудника с ролью {body.role} в офисе {body.office or '—'}",
+        )
+        raise AppError("FORBIDDEN", 403)
     client, admin = await _kc(request)
     try:
         r = await client.post(
