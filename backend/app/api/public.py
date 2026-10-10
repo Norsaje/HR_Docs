@@ -37,6 +37,15 @@ STATUS_RU = {
 }
 
 
+STAGE_RU = {
+    "queued": "В очереди, этап 1 из 4",
+    "preprocess": "Подготовка изображения, этап 2 из 4",
+    "extract": "Читаем документ, этап 3 из 4",
+    "ocr": "Читаем документ, этап 3 из 4",
+    "verify": "Проверяем данные, этап 4 из 4",
+}
+
+
 def _sha(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -265,6 +274,9 @@ async def get_application(
                 "status": d["status"] if d else "missing",
                 "status_ru": STATUS_RU[d["status"] if d else "missing"],
                 "stage": d["stage"] if d else None,
+                "stage_ru": STAGE_RU.get(d["stage"] or "")
+                if d and d["status"] in ("uploaded", "processing")
+                else None,
                 "message": "; ".join(filter(None, [d["message_ru"] if d else None, *msgs])) or None,
                 "files": [
                     {
