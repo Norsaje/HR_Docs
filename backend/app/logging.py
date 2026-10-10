@@ -9,16 +9,20 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import MutableMapping
 from typing import Any
 
 import structlog
 
-_SENSITIVE = ("token", "password", "secret", "authorization", "cookie", "api_key")
+# Точные имена и суффиксы, а не подстроки: иначе под фильтр попали бы метрики вроде tokens_in.
+_SENSITIVE = {"token", "password", "secret", "authorization", "cookie", "api_key", "set-cookie"}
+_SENSITIVE_SUFFIXES = ("_token", "_password", "_secret", "_key", "_cookie")
 
 
-def _redact(_: Any, __: str, event: dict[str, Any]) -> dict[str, Any]:
+def _redact(_: Any, __: str, event: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     for key in list(event):
-        if any(s in key.lower() for s in _SENSITIVE):
+        k = key.lower()
+        if k in _SENSITIVE or k.endswith(_SENSITIVE_SUFFIXES):
             event[key] = "***"
     return event
 
