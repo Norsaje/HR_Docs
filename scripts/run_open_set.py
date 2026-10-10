@@ -21,13 +21,19 @@ sys.path.insert(0, str(ROOT))
 from eval.dataset import load_samples  # noqa: E402
 
 SLOT = {  # вид в наборе → (страна, слот документа)
-    "ru_passport": ("RU", "ru_passport"), "snils": ("RU", "snils"), "inn": ("RU", "inn"),
-    "ru_driver_license": ("RU", "ru_driver_license"), "work_patent": ("UZ", "work_patent"),
-    "kg_driver_license": ("KG", "kg_driver_license"), "by_passport": ("BY", "by_passport"),
+    "ru_passport": ("RU", "ru_passport"),
+    "snils": ("RU", "snils"),
+    "inn": ("RU", "inn"),
+    "ru_driver_license": ("RU", "ru_driver_license"),
+    "work_patent": ("UZ", "work_patent"),
+    "kg_driver_license": ("KG", "kg_driver_license"),
+    "by_passport": ("BY", "by_passport"),
     "in_passport": ("IN", "in_passport"),
     # негативы: не тот разворот, чек, размытое и тёмное фото — в слоты документов РФ
-    "ru_passport_registration": ("RU", "ru_passport"), "not_document": ("RU", "inn"),
-    "unreadable_blurry": ("RU", "snils"), "unreadable_dark": ("RU", "snils"),
+    "ru_passport_registration": ("RU", "ru_passport"),
+    "not_document": ("RU", "inn"),
+    "unreadable_blurry": ("RU", "snils"),
+    "unreadable_dark": ("RU", "snils"),
 }
 FINAL = {"ready", "needs_review", "unreadable", "failed"}
 
@@ -44,16 +50,35 @@ def main() -> int:
     t0 = time.monotonic()
     for s in samples:
         country, slot = SLOT[s.kind]
-        a = c.post("/api/public/applications", json={"country_code": country, "full_name": "Прогон Набора",
-                                                     "email": "run@example.test", "consent_accepted": True}).json()
+        a = c.post(
+            "/api/public/applications",
+            json={
+                "country_code": country,
+                "full_name": "Прогон Набора",
+                "email": "run@example.test",
+                "consent_accepted": True,
+            },
+        ).json()
         mime = "application/pdf" if s.path.suffix.lower() == ".pdf" else "image/jpeg"
-        r = c.post(f"/api/public/applications/{a['application_id']}/files", data={"doc_type": slot},
-                   files={"files": (f"{s.short}{s.path.suffix}", s.path.read_bytes(), mime)},
-                   headers={"X-Application-Token": a["token"]})
-        res = r.json()["results"][0] if r.status_code == 200 else {"accepted": False, "error": r.json().get("error")}
-        c.post(f"/api/public/applications/{a['application_id']}/submit", headers={"X-Application-Token": a["token"]})
+        r = c.post(
+            f"/api/public/applications/{a['application_id']}/files",
+            data={"doc_type": slot},
+            files={"files": (f"{s.short}{s.path.suffix}", s.path.read_bytes(), mime)},
+            headers={"X-Application-Token": a["token"]},
+        )
+        res = (
+            r.json()["results"][0]
+            if r.status_code == 200
+            else {"accepted": False, "error": r.json().get("error")}
+        )
+        c.post(
+            f"/api/public/applications/{a['application_id']}/submit",
+            headers={"X-Application-Token": a["token"]},
+        )
         apps.append((s, slot, a, res))
-    print(f"загружено {sum(1 for x in apps if x[3]['accepted'])}/{len(apps)} за {time.monotonic() - t0:.1f} с")
+    print(
+        f"загружено {sum(1 for x in apps if x[3]['accepted'])}/{len(apps)} за {time.monotonic() - t0:.1f} с"
+    )
 
     if drill:
         time.sleep(15)
@@ -68,7 +93,9 @@ def main() -> int:
         for s, slot, a, res in apps:
             if not res["accepted"] or status.get(s.sha256) in FINAL:
                 continue
-            st = c.get(f"/api/public/applications/{a['application_id']}", headers={"X-Application-Token": a["token"]}).json()
+            st = c.get(
+                f"/api/public/applications/{a['application_id']}", headers={"X-Application-Token": a["token"]}
+            ).json()
             status[s.sha256] = next(d for d in st["documents"] if d["doc_type"] == slot)["status"]
         pending = [1 for s, _, _, res in apps if res["accepted"] and status.get(s.sha256) not in FINAL]
         if not pending:
