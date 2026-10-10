@@ -1,6 +1,8 @@
-// Истекающие документы: список на N дней вперёд и выгрузка CSV (ссылка — файл отдаёт API после проверки сессии).
+// Истекающие документы: список на N дней вперёд (уже истёкшие — сверху, красным) и выгрузка CSV.
+// Файл CSV отдаёт API после проверки сессии — обычная ссылка, без токенов в адресе.
 import { useEffect, useState } from "react";
-import { api, ApiError, type ExpiringItem } from "../api";
+import { api, errText, fmtDay, type ExpiringItem } from "../api";
+import { Empty, ErrorBox, Skeleton } from "../ui";
 
 export function ExpiringPage() {
   const [days, setDays] = useState(30);
@@ -12,40 +14,46 @@ export function ExpiringPage() {
     api
       .get<{ items: ExpiringItem[] }>(`/api/operator/expiring?days=${days}`)
       .then((r) => {
-        setItems(r.items);
+        setItems(r.items ?? []);
         setError(null);
       })
-      .catch((e: ApiError) => setError(e.message));
+      .catch((e) => setError(errText(e)));
   }, [days]);
 
   return (
     <section>
-      <h1>Истекающие документы</h1>
-      <div className="filters">
-        <label>
-          Срок, дней
+      <div className="page-head">
+        <h1>Истекающие документы</h1>
+        <span className="grow" />
+        <label className="check">
+          на ближайшие
           <select
+            className="input"
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
+            aria-label="Срок, дней"
           >
-            {[7, 30, 60, 90].map((d) => (
+            {[7, 30, 60, 90, 365].map((d) => (
               <option key={d} value={d}>
-                {d}
+                {d} дн.
               </option>
             ))}
           </select>
         </label>
         <a
-          className="btn"
+          className="btn small primary"
           href={`/api/operator/expiring?days=${days}&format=csv`}
         >
           Скачать CSV
         </a>
       </div>
-      {error && <div className="error-box">{error}</div>}
-      {items === null && !error && <div className="muted">Загрузка…</div>}
+      {error && <ErrorBox text={error} />}
+      {!items && !error && <Skeleton lines={5} height={32} />}
       {items && items.length === 0 && (
-        <div className="muted">Истекающих документов нет.</div>
+        <Empty
+          title="Истекающих документов нет"
+          hint="Здесь появятся документы, срок которых истёк или истекает в выбранный период."
+        />
       )}
       {items && items.length > 0 && (
         <table className="table">
@@ -59,24 +67,32 @@ export function ExpiringPage() {
             </tr>
           </thead>
           <tbody>
-            {items.map((x, i) => (
+            {items.map((i, n) => (
               <tr
-                key={i}
+                key={n}
                 className="clickable"
                 onClick={() =>
-                  (window.location.hash = "#/app/" + x.application_id)
+                  (window.location.hash = `#/app/${i.application_id}`)
                 }
               >
-                <td>
-                  <a href={"#/app/" + x.application_id}>{x.public_no}</a>
+                <td className="mono">
+                  <a href={`#/app/${i.application_id}`}>{i.public_no}</a>
                 </td>
-                <td>{x.full_name}</td>
-                <td>{x.title}</td>
-                <td>{x.expires_on}</td>
-                <td className={x.days_left < 0 ? "red-text" : ""}>
-                  {x.days_left < 0
-                    ? `истёк ${-x.days_left} дн. назад`
-                    : `${x.days_left} дн.`}
+                <td>{i.full_name}</td>
+                <td>{i.title}</td>
+                <td>{fmtDay(i.expires_on)}</td>
+                <td>
+                  {i.days_left < 0 ? (
+                    <span className="badge tone-bad">
+                      истёк {Math.abs(i.days_left)} дн. назад
+                    </span>
+                  ) : (
+                    <span
+                      className={`badge ${i.days_left <= 7 ? "tone-warn" : "tone-info"}`}
+                    >
+                      {i.days_left} дн.
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
