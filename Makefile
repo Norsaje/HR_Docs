@@ -68,6 +68,12 @@ llm-smoke: ## Один синтетический документ через т
 switch-llm: ## Переключить провайдера модели: make switch-llm TARGET=local|ilons (правит .env, пересоздаёт worker)
 	@P=$$(python3 -c "" >/dev/null 2>&1 && echo python3 || echo python); $$P -I scripts/switch_llm.py $(TARGET)
 
+kc-user: ## Завести сотрудника: make kc-user EMAIL=... FIRST=Имя LAST=Фамилия ROLE=supervisor [OFFICE=moscow]
+	cd backend && PYTHONIOENCODING=utf-8 uv run python ../scripts/kc_setup.py user "$(EMAIL)" "$(FIRST)" "$(LAST)" "$(ROLE)" "$(OFFICE)"
+
+kc-google: ## Включить «Войти через Google» (нужны GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET в .env)
+	cd backend && PYTHONIOENCODING=utf-8 uv run python ../scripts/kc_setup.py google
+
 kc-admin-tunnel-help: ## Команды SSH-туннеля к админке Keycloak и Mailpit
 	@echo "Админка Keycloak и Mailpit слушают только 127.0.0.1 стенда."
 	@echo "  ssh -L 8081:127.0.0.1:8081 -L 8025:127.0.0.1:8025 <пользователь>@<стенд>"
