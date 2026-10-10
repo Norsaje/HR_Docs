@@ -16,6 +16,7 @@ from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, File, Form, Header, Request, UploadFile
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app.audit.log import audit
@@ -146,7 +147,72 @@ async def create_application(request: Request, body: NewApplication) -> dict[str
             f"Создана заявка {public_no} (страна {country}), согласие {settings.CONSENT_VERSION} получено",
             application_id=app_id,
         )
+        # Код подтверждения email: в письме — сам код, в БД — только его sha256.
+        confirm = secrets.token_urlsafe(24)
+        await conn.execute("UPDATE applications SET email_confirm_hash=$2 WHERE id=$1", app_id, _sha(confirm))
+    row = await pool.fetchrow("SELECT * FROM applications WHERE id=$1", app_id)
+    link = f"{settings.PUBLIC_BASE_URL}/api/public/confirm-email?id={app_id}&code={confirm}"
+    body_text = "\n".join(
+        [
+            f"Здравствуйте, {name}!",
+            "",
+            f"Подтвердите, пожалуйста, email для заявки {public_no} — перейдите по ссылке:",
+            link,
+            "",
+            "Если вы не подавали заявку, просто проигнорируйте это письмо.",
+            "",
+            "Кадровое агентство",
+        ]
+    )
+    await send_mail(
+        pool,
+        settings,
+        row,
+        "confirm",
+        f"Подтвердите email для заявки {public_no}",
+        body_text,
+        actor="соискатель",
+    )
     return {"application_id": str(app_id), "public_no": public_no, "token": token}
+
+
+@router.get("/confirm-email", response_class=HTMLResponse, include_in_schema=False)
+async def confirm_email(request: Request, id: str = "", code: str = "") -> HTMLResponse:
+    """Переход по ссылке из письма: email соискателя подтверждён. Ответ — простая страница по-русски."""
+    pool = request.app.state.pool
+    try:
+        uid = uuid.UUID(id)
+    except ValueError:
+        uid = None
+    row = await pool.fetchrow("SELECT * FROM applications WHERE id=$1", uid) if uid else None
+    ok = bool(
+        row
+        and row["email_confirm_hash"]
+        and code
+        and secrets.compare_digest(row["email_confirm_hash"], _sha(code))
+    )
+    if ok and row and row["email_confirmed_at"] is None:
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("UPDATE applications SET email_confirmed_at=now() WHERE id=$1", row["id"])
+            await audit(
+                conn,
+                "соискатель",
+                "email.confirmed",
+                f"Email для заявки {row['public_no']} подтверждён",
+                application_id=row["id"],
+            )
+    text = (
+        "Email подтверждён. Спасибо! Статус заявки — по ссылке из письма «Заявка … принята»."
+        if ok
+        else "Ссылка подтверждения недействительна. Откройте ссылку из последнего письма ещё раз."
+    )
+    page = (
+        f'<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+        f'<title>Подтверждение email</title><body style="font-family:system-ui;max-width:32rem;margin:3rem auto;'
+        f'padding:0 1rem"><h1>{"Готово" if ok else "Не получилось"}</h1><p>{text}</p>'
+        f'<p><a href="/">На страницу приёма документов</a></p></body></html>'
+    )
+    return HTMLResponse(page, status_code=200 if ok else 400)
 
 
 @router.post("/applications/{app_id}/files")
@@ -293,6 +359,7 @@ async def get_application(
     return {
         "public_no": row["public_no"],
         "status": row["status"],
+        "email_confirmed": row["email_confirmed_at"] is not None,
         "documents": out,
         "missing": await missing_docs(st.pool, reg, row),
     }
