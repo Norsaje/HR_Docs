@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import re
 import secrets
 import shutil
@@ -105,10 +106,8 @@ def main() -> int:
         out.append(line)
 
     ENV.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
-    try:
+    with contextlib.suppress(OSError):  # на Windows права 600 не применяются
         ENV.chmod(0o600)
-    except OSError:
-        pass
     print("Заполнены: " + (", ".join(filled) if filled else "ничего, всё уже задано"))
     return 0
 

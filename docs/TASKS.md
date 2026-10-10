@@ -20,22 +20,22 @@
 
 ## Фаза 0. Каркас и проверки окружения (≈ 45 мин)
 
-- [ ] Репозиторий: `.gitignore`, `.env.example` (из этого пакета), `.pre-commit-config.yaml` с gitleaks, ruff и prettier. Первый коммит.
-- [ ] `Makefile` с целями из `10-eval-ops.md` (пока заглушки, печатающие «не реализовано»).
-- [ ] `docker-compose.yml`:
+- [x] Репозиторий: `.gitignore`, `.env.example` (из этого пакета), `.pre-commit-config.yaml` с gitleaks, ruff и prettier. Первый коммит.
+- [x] `Makefile` с целями из `10-eval-ops.md` (пока заглушки, печатающие «не реализовано»).
+- [x] `docker-compose.yml`:
   - сервисы postgres, seaweedfs, keycloak, mailpit, caddy;
   - сети `backend` (internal), `edge`, `egress`;
   - healthchecks;
   - `infra/postgres/init/01-init.sh`, `infra/seaweedfs/entrypoint.sh`.
-- [ ] Keycloak поднимается с `infra/keycloak/realm-hr.json`. Проверено:
+- [x] Keycloak поднимается с `infra/keycloak/realm-hr.json`. Проверено:
   - плейсхолдеры `${...}` подставились;
   - вход `editor.msk` работает;
   - discovery изнутри сети отдаёт публичный `issuer` и внутренние `token_endpoint` и `jwks_uri`.
 
   Результат — в `docs/decisions.md`.
-- [ ] `backend/`: uv-проект, FastAPI с `/api/healthz`, `config.py` (pydantic-settings), structlog, Dockerfile (non-root).
-- [ ] `registry/loader.py`: Pydantic-модель реестра, загрузка `registry/documents.yaml` при старте; тест «реестр валиден».
-- [ ] **Эксперименты 1–3** из `09-model-gateway.md` (`eval/experiments/`): olmOCR на кириллице, скорость и валидность Qwen на llm.ilons.ru, поддержка json_schema. Отчёт в `eval/reports/`, выводы в `docs/decisions.md`.
+- [x] `backend/`: uv-проект, FastAPI с `/api/healthz`, `config.py` (pydantic-settings), structlog, Dockerfile (non-root).
+- [x] `registry/loader.py`: Pydantic-модель реестра, загрузка `registry/documents.yaml` при старте; тест «реестр валиден».
+- [x] **Эксперименты 1–3** из `09-model-gateway.md` (`eval/experiments/`): olmOCR на кириллице, скорость и валидность Qwen на llm.ilons.ru, поддержка json_schema. Отчёт в `eval/reports/`, выводы в `docs/decisions.md`.
 
 **Гейт 0:** `docker compose up -d` поднимает инфраструктуру; `curl -k https://localhost/api/healthz` → 200; вход в Keycloak работает; эксперименты 1–3 записаны.
 
