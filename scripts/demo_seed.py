@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import mailpit_code
 
 ROOT = Path(__file__).resolve().parent.parent
 TEST = ROOT / "data" / "test"
@@ -31,6 +32,7 @@ def main() -> int:
         a = c.post("/api/public/applications", json={"country_code": country, "full_name": name,
                                                      "email": "demo@example.test", "consent_accepted": True}).json()
         h = {"X-Application-Token": a["token"]}
+        mailpit_code.confirm(c, a)  # код подтверждения из письма в Mailpit
         for doc_type, pattern in files.items():
             path = next(TEST.glob(pattern), None)
             if path is None:

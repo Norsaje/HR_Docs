@@ -15,6 +15,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import httpx
+import mailpit_code
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -59,6 +60,7 @@ def main() -> int:
                 "consent_accepted": True,
             },
         ).json()
+        mailpit_code.confirm(c, a)  # как соискатель: код из письма
         mime = "application/pdf" if s.path.suffix.lower() == ".pdf" else "image/jpeg"
         r = c.post(
             f"/api/public/applications/{a['application_id']}/files",
