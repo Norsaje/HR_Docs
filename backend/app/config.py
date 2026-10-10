@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     OIDC_INTERNAL_BASE: str = "http://keycloak:8080/kc/realms/hr"
     OIDC_CLIENT_ID: str = "operator-bff"
     KC_BFF_CLIENT_SECRET: SecretStr
+    KC_ADMIN_CLIENT_SECRET: SecretStr = SecretStr("")  # раздел «Сотрудники» (клиент operator-admin)
     OIDC_TOKEN_ENDPOINT: str = ""
     OIDC_JWKS_URI: str = ""
     SESSION_ENC_KEY: SecretStr

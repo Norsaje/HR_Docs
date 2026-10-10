@@ -28,6 +28,8 @@ PERMISSIONS = {
     "fields:edit": {"doc-editor", "supervisor"},
     "documents:reprocess": {"doc-editor", "supervisor"},
     "exports": {"doc-editor", "supervisor"},
+    "requests:send": {"doc-editor", "supervisor"},
+    "staff:manage": {"supervisor"},
 }
 
 

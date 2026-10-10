@@ -17,7 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import health, operator, public
+from app.api import health, operator, operator_extra, public
 from app.auth import oidc
 from app.config import get_settings
 from app.db.core import create_pool, migrate
@@ -103,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(public.router)
     app.include_router(oidc.router)
     app.include_router(operator.router)
+    app.include_router(operator_extra.router)
     return app
 
 

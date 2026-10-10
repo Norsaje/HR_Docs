@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from app.api import health, operator, public
+from app.api import health, operator, operator_extra, public
 from app.auth import oidc
 from app.main import app
 from fastapi.routing import APIRoute
@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 OPERATOR_ROUTES = [
     (method, route.path)
     # Все роутеры приложения (новые версии FastAPI прячут их в app.routes за обёрткой).
-    for router in (health.router, public.router, oidc.router, operator.router)
+    for router in (health.router, public.router, oidc.router, operator.router, operator_extra.router)
     for route in router.routes
     if isinstance(route, APIRoute) and route.path.startswith("/api/operator")
     for method in sorted(route.methods)

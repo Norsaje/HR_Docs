@@ -25,6 +25,19 @@ from app.messages import AppError
 from app.pipeline.run import recompute_document
 from app.registry.rules import normalize
 
+try:
+    from app.pipeline.confidence import SIGNALS_RU
+except ImportError:  # pragma: no cover — запасной словарь
+    SIGNALS_RU = {
+        "checksum_ok": "подтверждено контрольной суммой",
+        "text_layer_match": "совпадает с текстовым слоем PDF",
+        "single_source": "прочитал один источник — стоит взглянуть",
+        "rule_fail": "нарушено правило — нужна проверка",
+        "unreadable": "не читается на изображении",
+        "absent": "поля нет на документе",
+        "operator_edit": "исправлено оператором",
+    }
+
 router = APIRouter(prefix="/api/operator", dependencies=[Depends(get_operator), Depends(csrf_guard)])
 
 
@@ -38,6 +51,13 @@ def mask_number(v: str | None) -> str | None:
     if not v or len(v) < 6:
         return v
     return v[:2] + re.sub(r"[0-9A-Za-zА-Яа-я]", "*", v[2:-3]) + v[-3:]
+
+
+def _masked(fdef: Any, value: str | None) -> str:
+    """Номера (цифры и коды) маскируются в тексте журнала, остальное — как есть."""
+    if not value:
+        return "—"
+    return mask_number(value) or "—" if fdef.type in ("digits", "code") else value
 
 
 def _uuid(value: str) -> uuid.UUID:
@@ -63,8 +83,10 @@ async def list_applications(
     status: str = "",
     country: str = "",
     q: str = "",
+    has_errors: str = "",
     op: Operator = Depends(require("applications:read")),
 ) -> dict[str, Any]:
+    reg = request.app.state.registry
     where, params = scoped_where(op, "a", 1)
     cond = [where, "a.status <> 'draft'"]
     args: list[Any] = list(params)
@@ -77,6 +99,11 @@ async def list_applications(
     if q:
         args.append(f"%{q}%")
         cond.append(f"(a.full_name ILIKE ${len(args)} OR a.public_no ILIKE ${len(args)})")
+    if has_errors in ("1", "true"):
+        cond.append(
+            "EXISTS (SELECT 1 FROM issues i JOIN documents d ON d.id=i.document_id "
+            "WHERE d.application_id=a.id AND i.severity='error')"
+        )
     rows = await request.app.state.pool.fetch(
         f"""SELECT a.*, (SELECT count(*) FROM documents d WHERE d.application_id=a.id) AS documents_total,
               (SELECT count(*) FROM documents d WHERE d.application_id=a.id AND d.status='ready') AS documents_ready,
@@ -85,9 +112,29 @@ async def list_applications(
             FROM applications a WHERE {" AND ".join(cond)} ORDER BY a.created_at DESC LIMIT 200""",
         *args,
     )
+    ids = [r["id"] for r in rows]
+    chips: dict[Any, list[dict[str, Any]]] = {}
+    for d in await request.app.state.pool.fetch(
+        "SELECT d.application_id, d.doc_type, d.status, "
+        "(SELECT count(*) FROM issues i WHERE i.document_id=d.id AND i.severity='error') AS errors "
+        "FROM documents d WHERE d.application_id = ANY($1::uuid[]) ORDER BY d.doc_type",
+        ids,
+    ):
+        chips.setdefault(d["application_id"], []).append(
+            {
+                "doc_type": d["doc_type"],
+                "title": reg.documents[d["doc_type"]].title
+                if d["doc_type"] in reg.documents
+                else d["doc_type"],
+                "status": d["status"],
+                "errors": d["errors"],
+            }
+        )
     return {
         "items": [
             {
+                "documents": chips.get(r["id"], []),
+                "errors_count": sum(c["errors"] for c in chips.get(r["id"], [])),
                 "id": str(r["id"]),
                 "public_no": r["public_no"],
                 "full_name": r["full_name"],
@@ -137,6 +184,8 @@ async def card(
                 "stage": d["stage"],
                 "message": d["message_ru"],
                 "expires_on": d["expires_on"].isoformat() if d["expires_on"] else None,
+                "verified_by": d["verified_by"],
+                "verified_at": d["verified_at"].isoformat() if d["verified_at"] else None,
                 "issues": [dict(i) for i in issues],
                 "files": [
                     {"file_id": str(f["id"]), "status": f["status"], "error_message": f["error_message_ru"]}
@@ -155,8 +204,12 @@ async def card(
                             "status": f["status"],
                             "confidence": f["confidence"],
                             "signals": json.loads(f["signals"]),
+                            "signals_ru": [SIGNALS_RU.get(c, c) for c in json.loads(f["signals"])],
+                            "candidates": json.loads(f["candidates"]) if f["candidates"] else {},
+                            "hint": f["hint"],
                             "source": f["source"],
                             "edited_by": f["edited_by"],
+                            "edited_at": f["edited_at"].isoformat() if f["edited_at"] else None,
                             "bbox": json.loads(f["bbox"]) if f["bbox"] else None,
                             "file_id": str(f["file_id"]) if f["file_id"] else None,
                         }
@@ -197,6 +250,8 @@ async def card(
                         f"({title(bitems[i][0])}) и {bitems[j][1]} ({title(bitems[j][0])})",
                     }
                 )
+    group = reg.group_for_country(a["country_code"])
+    allowed = list(group.documents) if group else []
     entered = _norm_name(a["full_name"])
     for dt, n in names.items():
         if n and not set(n.split()) <= set(entered.split()):
@@ -216,6 +271,10 @@ async def card(
             "country_code": a["country_code"],
             "status": a["status"],
             "created_at": a["created_at"].isoformat(),
+            "missing": [
+                dt for dt in allowed if reg.documents[dt].required and dt not in {d["doc_type"] for d in docs}
+            ],
+            "allowed_doc_types": [{"doc_type": dt, "title": reg.documents[dt].title} for dt in allowed],
         },
         "documents": out,
         "crosscheck": crosscheck,
@@ -284,10 +343,11 @@ async def edit_field(
             conn,
             op.name,
             "field.edited",
-            f"Оператор {op.name} исправил поле «{fdef.label}»: {f['value'] or '—'} → {new or '—'}",
+            # В общем журнале номера маскируются; полное «было → стало» — в details для вкладки «История».
+            f"Оператор {op.name} исправил поле «{fdef.label}»: {_masked(fdef, f['value'])} → {_masked(fdef, new)}",
             application_id=f["application_id"],
             object_id=f["id"],
-            details={"field": f["key"], "old": f["value"], "new": new},
+            details={"field": f["key"], "label": fdef.label, "old": f["value"], "new": new},
         )
     return {"ok": True, "value": new}
 
@@ -401,20 +461,26 @@ async def history(
 ) -> dict[str, Any]:
     a = await _app_or_404(request, op, _uuid(app_id))
     rows = await request.app.state.pool.fetch(
-        "SELECT at, actor, action, message_ru FROM audit_events WHERE application_id=$1 ORDER BY at, id",
+        "SELECT at, actor, action, message_ru, details FROM audit_events WHERE application_id=$1 ORDER BY at, id",
         a["id"],
     )
-    return {
-        "items": [
+    items = []
+    for r in rows:
+        message, d = r["message_ru"], json.loads(r["details"] or "{}")
+        if r["action"] == "field.edited" and "old" in d:
+            # Во вкладке «История» оператору с правом видно полное «было → стало».
+            message = f"{r['actor']} исправил поле «{d.get('label', d.get('field'))}»: {d['old'] or '—'} → {d['new'] or '—'}"
+        items.append(
             {
                 "at": r["at"].isoformat(),
                 "actor": r["actor"],
                 "action": r["action"],
-                "message": r["message_ru"],
+                "message": message,
+                "old": d.get("old"),
+                "new": d.get("new"),
             }
-            for r in rows
-        ]
-    }
+        )
+    return {"items": items}
 
 
 @router.get("/applications/{app_id}/export")
