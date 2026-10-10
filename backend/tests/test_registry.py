@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from app.config import APP_ROOT
 from app.registry.loader import RegistryError, load_registry
 

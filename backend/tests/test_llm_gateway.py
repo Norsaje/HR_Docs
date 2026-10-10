@@ -14,13 +14,12 @@ from typing import Any
 import httpx
 import pytest
 import respx
-from PIL import Image
-
 from app.config import APP_ROOT, Settings
 from app.llm.errors import ModelError
 from app.llm.gateway import Gateway
 from app.llm.schema_builder import extract_schema
 from app.registry.loader import Registry, load_registry
+from PIL import Image
 
 LLM = "http://llm.test/v1"
 OCR = "http://ocr.test"

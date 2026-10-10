@@ -1,0 +1,12 @@
+# Общие настройки ruff для backend/ и eval/ (и для pre-commit, и для `make lint`).
+line-length = 110
+target-version = "py312"
+# Только Python: спецификацию и документацию ruff не трогает.
+extend-exclude = ["docs", "data", "*.md"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC"]
+
+[lint.per-file-ignores]
+# Скрипты экспериментов: длинные строки — это строки отчёта, импорты после загрузки .env.
+"eval/**" = ["E501", "E402"]

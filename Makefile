@@ -51,7 +51,7 @@ eval: ## Оценка качества: make eval [SPLIT=dev|holdout|distorted|a
 	@echo "не реализовано (фаза 2)"; exit 1
 
 experiments: ## Эксперименты фазы 0 с моделью и OCR (eval/experiments)
-	cd backend && uv run python ../eval/experiments/run_all.py
+	cd backend && PYTHONIOENCODING=utf-8 uv run python ../eval/experiments/phase0.py
 
 llm-smoke: ## Один синтетический документ через текущий LLM_BASE_URL
 	@echo "не реализовано (фаза 1)"; exit 1
