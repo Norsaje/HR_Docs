@@ -16,7 +16,6 @@ from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, File, Form, Header, Request, UploadFile
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app.audit.log import audit
@@ -147,19 +146,35 @@ async def create_application(request: Request, body: NewApplication) -> dict[str
             f"Создана заявка {public_no} (страна {country}), согласие {settings.CONSENT_VERSION} получено",
             application_id=app_id,
         )
-        # Код подтверждения email: в письме — сам код, в БД — только его sha256.
-        confirm = secrets.token_urlsafe(24)
-        await conn.execute("UPDATE applications SET email_confirm_hash=$2 WHERE id=$1", app_id, _sha(confirm))
+    code = await _new_email_code(pool, app_id)
     row = await pool.fetchrow("SELECT * FROM applications WHERE id=$1", app_id)
-    link = f"{settings.PUBLIC_BASE_URL}/api/public/confirm-email?id={app_id}&code={confirm}"
+    await _send_code(pool, settings, row, code)
+    return {"application_id": str(app_id), "public_no": public_no, "token": token}
+
+
+def _code_hash(app_id: Any, code: str) -> str:
+    # Код короткий (6 цифр), поэтому хешируем вместе с id заявки; перебор ограничен 5 попытками.
+    return _sha(f"{app_id}:{code}")
+
+
+async def _new_email_code(pool: asyncpg.Pool, app_id: Any) -> str:
+    code = f"{secrets.randbelow(10**6):06d}"
+    await pool.execute(
+        "UPDATE applications SET email_confirm_hash=$2, email_confirm_attempts=0, email_code_sent_at=now() WHERE id=$1",
+        app_id,
+        _code_hash(app_id, code),
+    )
+    return code
+
+
+async def _send_code(pool: asyncpg.Pool, settings: Any, row: asyncpg.Record, code: str) -> None:
     body_text = "\n".join(
         [
-            f"Здравствуйте, {name}!",
+            f"Здравствуйте, {row['full_name']}!",
             "",
-            f"Подтвердите, пожалуйста, email для заявки {public_no} — перейдите по ссылке:",
-            link,
+            f"Код подтверждения email для заявки {row['public_no']}: {code}",
             "",
-            "Если вы не подавали заявку, просто проигнорируйте это письмо.",
+            "Введите его на странице заявки. Если вы не подавали заявку, просто проигнорируйте это письмо.",
             "",
             "Кадровое агентство",
         ]
@@ -169,50 +184,68 @@ async def create_application(request: Request, body: NewApplication) -> dict[str
         settings,
         row,
         "confirm",
-        f"Подтвердите email для заявки {public_no}",
+        f"Код подтверждения для заявки {row['public_no']}",
         body_text,
         actor="соискатель",
     )
-    return {"application_id": str(app_id), "public_no": public_no, "token": token}
 
 
-@router.get("/confirm-email", response_class=HTMLResponse, include_in_schema=False)
-async def confirm_email(request: Request, id: str = "", code: str = "") -> HTMLResponse:
-    """Переход по ссылке из письма: email соискателя подтверждён. Ответ — простая страница по-русски."""
+class ConfirmBody(BaseModel):
+    code: str
+
+
+@router.post("/applications/{app_id}/confirm-email")
+async def confirm_email(
+    request: Request, app_id: str, body: ConfirmBody, x_application_token: str | None = Header(default=None)
+) -> dict[str, Any]:
+    """Соискатель вводит код из письма. Без подтверждения сервер не принимает файлы и отправку."""
+    row = await load_app(request, app_id, x_application_token)
     pool = request.app.state.pool
-    try:
-        uid = uuid.UUID(id)
-    except ValueError:
-        uid = None
-    row = await pool.fetchrow("SELECT * FROM applications WHERE id=$1", uid) if uid else None
-    ok = bool(
-        row
-        and row["email_confirm_hash"]
-        and code
-        and secrets.compare_digest(row["email_confirm_hash"], _sha(code))
-    )
-    if ok and row and row["email_confirmed_at"] is None:
-        async with pool.acquire() as conn, conn.transaction():
-            await conn.execute("UPDATE applications SET email_confirmed_at=now() WHERE id=$1", row["id"])
-            await audit(
-                conn,
-                "соискатель",
-                "email.confirmed",
-                f"Email для заявки {row['public_no']} подтверждён",
-                application_id=row["id"],
-            )
-    text = (
-        "Email подтверждён. Спасибо! Статус заявки — по ссылке из письма «Заявка … принята»."
-        if ok
-        else "Ссылка подтверждения недействительна. Откройте ссылку из последнего письма ещё раз."
-    )
-    page = (
-        f'<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
-        f'<title>Подтверждение email</title><body style="font-family:system-ui;max-width:32rem;margin:3rem auto;'
-        f'padding:0 1rem"><h1>{"Готово" if ok else "Не получилось"}</h1><p>{text}</p>'
-        f'<p><a href="/">На страницу приёма документов</a></p></body></html>'
-    )
-    return HTMLResponse(page, status_code=200 if ok else 400)
+    if row["email_confirmed_at"] is not None:
+        return {"email_confirmed": True}
+    if row["email_confirm_attempts"] >= 5:
+        raise AppError("CODE_TOO_MANY", 429)
+    code = "".join(ch for ch in body.code if ch.isdigit())
+    if not row["email_confirm_hash"] or not secrets.compare_digest(
+        row["email_confirm_hash"], _code_hash(row["id"], code)
+    ):
+        await pool.execute(
+            "UPDATE applications SET email_confirm_attempts=email_confirm_attempts+1 WHERE id=$1", row["id"]
+        )
+        raise AppError("CODE_INVALID", 422, left=max(0, 4 - row["email_confirm_attempts"]))
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "UPDATE applications SET email_confirmed_at=now(), email_confirm_hash=NULL WHERE id=$1", row["id"]
+        )
+        await audit(
+            conn,
+            "соискатель",
+            "email.confirmed",
+            f"Email для заявки {row['public_no']} подтверждён кодом",
+            application_id=row["id"],
+        )
+    return {"email_confirmed": True}
+
+
+@router.post("/applications/{app_id}/resend-code")
+async def resend_code(
+    request: Request, app_id: str, x_application_token: str | None = Header(default=None)
+) -> dict[str, Any]:
+    row = await load_app(request, app_id, x_application_token)
+    st = request.app.state
+    if row["email_confirmed_at"] is not None:
+        return {"sent": False, "email_confirmed": True}
+    sent = row["email_code_sent_at"]
+    if sent and (datetime.now(UTC) - sent).total_seconds() < 60:
+        raise AppError("CODE_TOO_SOON", 429)
+    code = await _new_email_code(st.pool, row["id"])
+    await _send_code(st.pool, st.settings, row, code)
+    return {"sent": True}
+
+
+def require_confirmed(row: asyncpg.Record) -> None:
+    if row["email_confirmed_at"] is None:
+        raise AppError("EMAIL_NOT_CONFIRMED", 403)
 
 
 @router.post("/applications/{app_id}/files")
@@ -225,6 +258,7 @@ async def upload_files(
 ) -> dict[str, Any]:
     st = request.app.state
     row = await load_app(request, app_id, x_application_token)
+    require_confirmed(row)
     if len(files) > st.settings.MAX_FILES_PER_REQUEST:
         raise AppError("TOO_MANY_FILES_REQUEST", 422, n=st.settings.MAX_FILES_PER_REQUEST)
     results = []
@@ -270,6 +304,7 @@ async def submit(
 ) -> dict[str, Any]:
     st = request.app.state
     row = await load_app(request, app_id, x_application_token)
+    require_confirmed(row)
     missing = await missing_docs(st.pool, st.registry, row)
     async with st.pool.acquire() as conn, conn.transaction():
         await conn.execute(
