@@ -42,28 +42,28 @@
 ## Фаза 1. Сквозной срез на паспорте РФ (≈ 2–2,5 ч)
 
 Бэкенд и очередь:
-- [ ] Модели БД и первая миграция: все таблицы из `03-data-model.md`; роли `hr_owner`/`hr_app`; права на `audit_events`.
-- [ ] `audit/log.py`: запись события в той же сессии БД.
-- [ ] `messages.py`: каталог ошибок; глобальный обработчик ошибок с `support_id`.
-- [ ] `storage/s3.py`: put/get/delete, создание бакета при старте.
+- [x] Модели БД и первая миграция: все таблицы из `03-data-model.md`; роли `hr_owner`/`hr_app`; права на `audit_events`.
+- [x] `audit/log.py`: запись события в той же сессии БД.
+- [x] `messages.py`: каталог ошибок; глобальный обработчик ошибок с `support_id`.
+- [x] `storage/s3.py`: put/get/delete, создание бакета при старте.
 - [ ] `intake/`: сигнатуры, лимиты, SHA-256, pHash; тесты на каждый отказ.
-- [ ] Публичное API: countries, requirements, consent, создание заявки (с согласием), загрузка файлов, submit, GET состояния.
-- [ ] `queue/`: `jobs` (постановка в транзакции, захват `SKIP LOCKED`, heartbeat, reaper, LISTEN/NOTIFY, graceful shutdown); тесты захвата и reaper на реальном PostgreSQL.
+- [x] Публичное API: countries, requirements, consent, создание заявки (с согласием), загрузка файлов, submit, GET состояния.
+- [x] `queue/`: `jobs` (постановка в транзакции, захват `SKIP LOCKED`, heartbeat, reaper, LISTEN/NOTIFY, graceful shutdown); тесты захвата и reaper на реальном PostgreSQL.
 
 Разбор:
-- [ ] `llm/`: шлюз, `openai_compat`, `olmocr_http`, `schema_builder`, загрузка промптов; тесты ошибок через respx (таймаут, 503, не-JSON, `finish_reason=length`, не по схеме → ошибка, а не данные).
+- [x] `llm/`: шлюз, `openai_compat`, `olmocr_http`, `schema_builder`, загрузка промптов; тесты ошибок через respx (таймаут, 503, не-JSON, `finish_reason=length`, не по схеме → ошибка, а не данные).
 - [ ] `pipeline/`: preprocess, quality, проход A, проход B, сверка (без арбитра), правила, цвет поля, слияние, статусы. Сначала только `ru_passport`.
 - [ ] `registry/`: `checksums.py`, `dates.py`, `mrz.py` (`ru_internal`, `td3`, `td1`), `rules.py`; тесты на векторы из `06-documents.md`.
 
 Вход и оператор:
 - [ ] `auth/`: BFF-поток OIDC, сессии, cookie, CSRF, permissions, `scoped()`; тесты безопасности 1–6 из `07-auth-security.md`.
-- [ ] Операторское API: список, карточка, страницы файлов, PATCH поля, reprocess, queue.
+- [x] Операторское API: список, карточка, страницы файлов, PATCH поля, reprocess, queue.
 - [ ] SSE: `/api/public/applications/{id}/events` и `/api/operator/events` поверх LISTEN/NOTIFY.
 
 Фронтенды:
-- [ ] `web/applicant`: экраны 1–3 (`08-frontend.md`), загрузка с прогрессом, SSE-статусы.
-- [ ] `web/operator`: логин-редирект, список, карточка (оригинал + поля + подсветка + правка), «В работе».
-- [ ] Caddy: сборка обоих фронтендов, маршрутизация, CSP.
+- [x] `web/applicant`: экраны 1–3 (`08-frontend.md`), загрузка с прогрессом, SSE-статусы.
+- [x] `web/operator`: логин-редирект, список, карточка (оригинал + поля + подсветка + правка), «В работе».
+- [x] Caddy: сборка обоих фронтендов, маршрутизация, CSP.
 
 **Гейт 1** (обязательно перед фазой 2):
 - паспорт РФ проходит весь путь на настоящей модели: телефон → очередь → разбор → карточка оператора с цветами и рамками → правка → история;
@@ -73,7 +73,7 @@
 
 ## Фаза 2. Все восемь видов и проверки (≈ 2 ч)
 
-- [ ] Реестр: все восемь видов, по одному коммиту на вид, с тестами правил.
+- [x] Реестр: все восемь видов, по одному коммиту на вид, с тестами правил.
 - [ ] МЧЗ: TD3 (Узбекистан, паспорта ЕС), TD1 (ID-карты ЕС, ВНЖ). Формат `ru_internal` сверить на реальном образце.
 - [ ] Межпольные правила: сроки, `after_field`, `max_months_after`, `min_age_at_issue`, `ru_passport_age_validity`.
 - [ ] Классификация: несовпадение слота и вида → замечание.
